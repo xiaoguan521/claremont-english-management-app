@@ -1,0 +1,283 @@
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+
+import { createManagedUser } from '../lib/admin'
+import { useAuth } from '../lib/auth'
+import { supabase } from '../lib/supabase'
+
+type MembershipRow = {
+  id: string
+  user_id: string
+  school_id: string
+  role: string
+}
+
+type ProfileRow = {
+  id: string
+  display_name: string | null
+  phone: string | null
+}
+
+type TeacherView = {
+  id: string
+  name: string
+  phone: string
+  role: string
+  schoolName: string
+}
+
+type SchoolOption = {
+  id: string
+  name: string
+}
+
+export function TeachersPage() {
+  const { memberships } = useAuth()
+  const [teachers, setTeachers] = useState<TeacherView[]>([])
+  const [schools, setSchools] = useState<SchoolOption[]>([])
+  const [refreshToken, setRefreshToken] = useState(0)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<string | null>(null)
+  const [form, setForm] = useState({
+    schoolId: '',
+    displayName: '',
+    phone: '',
+    email: '',
+    password: '',
+    role: 'teacher',
+  })
+
+  const schoolIds = useMemo(
+    () => Array.from(new Set(memberships.map((item) => item.school_id))),
+    [memberships],
+  )
+
+  useEffect(() => {
+    const load = async () => {
+      if (schoolIds.length === 0) {
+        setTeachers([])
+        setSchools([])
+        return
+      }
+
+      const [membershipResponse, schoolsResponse] = await Promise.all([
+        supabase
+          .from('memberships')
+          .select('id, user_id, school_id, role')
+          .in('school_id', schoolIds)
+          .in('role', ['teacher', 'school_admin'])
+          .eq('status', 'active'),
+        supabase.from('schools').select('id, name').in('id', schoolIds),
+      ])
+
+      if (membershipResponse.error || schoolsResponse.error) {
+        console.error(membershipResponse.error || schoolsResponse.error)
+        return
+      }
+
+      const nextSchools = (schoolsResponse.data ?? []) as SchoolOption[]
+      setSchools(nextSchools)
+      if (nextSchools.length > 0 && !form.schoolId) {
+        setForm((current) => ({ ...current, schoolId: nextSchools[0].id }))
+      }
+
+      const userIds = Array.from(
+        new Set((membershipResponse.data ?? []).map((item) => item.user_id)),
+      )
+
+      const { data: profileRows, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, display_name, phone')
+        .in('id', userIds)
+
+      if (profileError) {
+        console.error(profileError)
+        return
+      }
+
+      const profileMap = new Map(
+        ((profileRows ?? []) as ProfileRow[]).map((item) => [item.id, item]),
+      )
+      const schoolMap = new Map(nextSchools.map((item) => [item.id, item.name]))
+
+      setTeachers(
+        ((membershipResponse.data ?? []) as MembershipRow[]).map((item) => ({
+          id: item.id,
+          name: profileMap.get(item.user_id)?.display_name ?? '未命名账号',
+          phone: profileMap.get(item.user_id)?.phone ?? '-',
+          role: item.role === 'school_admin' ? '校区管理员' : '教师',
+          schoolName: schoolMap.get(item.school_id) ?? item.school_id,
+        })),
+      )
+    }
+
+    void load()
+  }, [form.schoolId, refreshToken, schoolIds])
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSubmitting(true)
+    setError(null)
+    setFeedback(null)
+
+    try {
+      await createManagedUser({
+        email: form.email.trim(),
+        password: form.password,
+        displayName: form.displayName.trim(),
+        phone: form.phone.trim(),
+        schoolId: form.schoolId,
+        role: form.role as 'teacher' | 'school_admin',
+      })
+
+      setFeedback('教师账号已创建并绑定到校区。')
+      setForm((current) => ({
+        ...current,
+        displayName: '',
+        phone: '',
+        email: '',
+        password: '',
+        role: 'teacher',
+      }))
+      setRefreshToken((value) => value + 1)
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : '创建教师账号失败。',
+      )
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="page-layout">
+      <header className="page-header">
+        <div>
+          <h2>教师档案</h2>
+          <p>今天先把校区管理员创建教师账号的动作接起来，后面再补更细的权限配置。</p>
+        </div>
+        <div className="page-tag">Teachers</div>
+      </header>
+
+      <article className="panel-card">
+        <div className="panel-header">
+          <h3>新增教师账号</h3>
+          <p>创建后会同时写入 Supabase Auth、profiles 和 memberships。</p>
+        </div>
+
+        <form className="inline-form" onSubmit={handleSubmit}>
+          <label>
+            所属校区
+            <select
+              value={form.schoolId}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, schoolId: event.target.value }))
+              }
+              required
+            >
+              {schools.map((school) => (
+                <option key={school.id} value={school.id}>
+                  {school.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            角色
+            <select
+              value={form.role}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, role: event.target.value }))
+              }
+            >
+              <option value="teacher">教师</option>
+              <option value="school_admin">校区管理员</option>
+            </select>
+          </label>
+
+          <label>
+            姓名
+            <input
+              value={form.displayName}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, displayName: event.target.value }))
+              }
+              placeholder="例如：李老师"
+              required
+            />
+          </label>
+
+          <label>
+            手机号
+            <input
+              value={form.phone}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, phone: event.target.value }))
+              }
+              placeholder="选填"
+            />
+          </label>
+
+          <label>
+            登录邮箱
+            <input
+              type="email"
+              value={form.email}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, email: event.target.value }))
+              }
+              placeholder="teacher@example.com"
+              required
+            />
+          </label>
+
+          <label>
+            初始密码
+            <input
+              type="password"
+              value={form.password}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, password: event.target.value }))
+              }
+              placeholder="至少 6 位"
+              required
+            />
+          </label>
+
+          {error ? <div className="error-banner span-2">{error}</div> : null}
+          {feedback ? <div className="success-banner span-2">{feedback}</div> : null}
+
+          <div className="form-actions span-2">
+            <button className="primary-button" disabled={submitting} type="submit">
+              {submitting ? '创建中...' : '创建教师账号'}
+            </button>
+          </div>
+        </form>
+      </article>
+
+      <div className="table-card">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>姓名</th>
+              <th>手机号</th>
+              <th>角色</th>
+              <th>校区</th>
+            </tr>
+          </thead>
+          <tbody>
+            {teachers.map((item) => (
+              <tr key={item.id}>
+                <td>{item.name}</td>
+                <td>{item.phone}</td>
+                <td>{item.role}</td>
+                <td>{item.schoolName}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
