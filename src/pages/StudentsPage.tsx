@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import {
   createManagedUser,
@@ -55,6 +56,7 @@ type CreatedAccount = {
 
 export function StudentsPage() {
   const { memberships } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [students, setStudents] = useState<StudentView[]>([])
   const [schools, setSchools] = useState<SchoolOption[]>([])
   const [classes, setClasses] = useState<ClassOption[]>([])
@@ -76,6 +78,19 @@ export function StudentsPage() {
   const schoolIds = useMemo(
     () => Array.from(new Set(memberships.map((item) => item.school_id))),
     [memberships],
+  )
+  const focusedSchoolId = searchParams.get('schoolId')
+  const focusedClassId = searchParams.get('classId')
+  const focusedSchoolName = schools.find((item) => item.id === focusedSchoolId)?.name ?? null
+  const focusedClassName = classes.find((item) => item.id === focusedClassId)?.name ?? null
+  const visibleStudents = useMemo(
+    () =>
+      students.filter((item) => {
+        if (focusedSchoolId && item.schoolId !== focusedSchoolId) return false
+        if (focusedClassId && item.classId !== focusedClassId) return false
+        return true
+      }),
+    [focusedClassId, focusedSchoolId, students],
   )
 
   useEffect(() => {
@@ -301,6 +316,34 @@ export function StudentsPage() {
         <div className="page-tag">Students</div>
       </header>
 
+      {focusedSchoolName || focusedClassName ? (
+        <div className="filter-banner">
+          <div>
+            <strong>
+              当前聚焦：
+              {focusedClassName ? `${focusedClassName}` : focusedSchoolName}
+            </strong>
+            <span>
+              {focusedClassName
+                ? '只展示这个班级的学员，方便继续处理催交或账号问题。'
+                : '只展示当前校区的学员。'}
+            </span>
+          </div>
+          <button
+            className="ghost-button compact-button"
+            onClick={() => {
+              const nextParams = new URLSearchParams(searchParams)
+              nextParams.delete('schoolId')
+              nextParams.delete('classId')
+              setSearchParams(nextParams)
+            }}
+            type="button"
+          >
+            查看全部学员
+          </button>
+        </div>
+      ) : null}
+
       <article className="panel-card">
         <div className="panel-header">
           <h3>新增学生账号</h3>
@@ -432,7 +475,7 @@ export function StudentsPage() {
             </tr>
           </thead>
           <tbody>
-            {students.map((item) => (
+            {visibleStudents.map((item) => (
               <tr key={item.id}>
                 <td>{item.name}</td>
                 <td>{item.phone}</td>

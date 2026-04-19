@@ -8,7 +8,7 @@ const navigationItems = [
   { to: '/classes', label: '班级编排' },
   { to: '/teachers', label: '教师档案' },
   { to: '/students', label: '学员名单' },
-  { to: '/assignments', label: '作业总览' },
+  { to: '/assignments', label: '作业异常' },
 ]
 
 export function AppShell() {

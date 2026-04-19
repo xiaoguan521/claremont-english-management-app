@@ -137,6 +137,31 @@
   font-weight: 700;
 }
 
+.filter-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  padding: 18px 20px;
+  border-radius: 20px;
+  background: rgba(219, 234, 254, 0.78);
+  color: #1e3a8a;
+}
+
+.filter-banner div {
+  display: grid;
+  gap: 4px;
+}
+
+.filter-banner strong {
+  font-size: 15px;
+}
+
+.filter-banner span {
+  color: #334155;
+  font-size: 14px;
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -414,6 +439,12 @@
   gap: 12px;
 }
 
+.action-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .empty-state,
 .screen-state {
   display: grid;
@@ -562,6 +593,11 @@
 
   .content-area {
     padding: 22px;
+  }
+
+  .filter-banner {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .operations-metrics {

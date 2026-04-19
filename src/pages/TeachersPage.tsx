@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import {
   createManagedUser,
@@ -47,6 +48,7 @@ type CreatedAccount = {
 
 export function TeachersPage() {
   const { memberships } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [teachers, setTeachers] = useState<TeacherView[]>([])
   const [schools, setSchools] = useState<SchoolOption[]>([])
   const [refreshToken, setRefreshToken] = useState(0)
@@ -67,6 +69,15 @@ export function TeachersPage() {
   const schoolIds = useMemo(
     () => Array.from(new Set(memberships.map((item) => item.school_id))),
     [memberships],
+  )
+  const focusedSchoolId = searchParams.get('schoolId')
+  const focusedSchoolName = schools.find((item) => item.id === focusedSchoolId)?.name ?? null
+  const visibleTeachers = useMemo(
+    () =>
+      focusedSchoolId
+        ? teachers.filter((item) => item.schoolId === focusedSchoolId)
+        : teachers,
+    [focusedSchoolId, teachers],
   )
 
   useEffect(() => {
@@ -253,6 +264,26 @@ export function TeachersPage() {
         <div className="page-tag">Teachers</div>
       </header>
 
+      {focusedSchoolName ? (
+        <div className="filter-banner">
+          <div>
+            <strong>当前聚焦校区：{focusedSchoolName}</strong>
+            <span>这是从班级或作业工作台带过来的教师视角。</span>
+          </div>
+          <button
+            className="ghost-button compact-button"
+            onClick={() => {
+              const nextParams = new URLSearchParams(searchParams)
+              nextParams.delete('schoolId')
+              setSearchParams(nextParams)
+            }}
+            type="button"
+          >
+            查看全部教师
+          </button>
+        </div>
+      ) : null}
+
       <article className="panel-card">
         <div className="panel-header">
           <h3>新增教师账号</h3>
@@ -380,7 +411,7 @@ export function TeachersPage() {
             </tr>
           </thead>
           <tbody>
-            {teachers.map((item) => (
+            {visibleTeachers.map((item) => (
               <tr key={item.id}>
                 <td>{item.name}</td>
                 <td>{item.phone}</td>

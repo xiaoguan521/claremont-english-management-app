@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
@@ -55,6 +56,8 @@ type AssignmentView = AssignmentRow & {
 
 export function AssignmentsPage() {
   const { memberships } = useAuth()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [assignments, setAssignments] = useState<AssignmentView[]>([])
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null)
 
@@ -62,10 +65,26 @@ export function AssignmentsPage() {
     () => Array.from(new Set(memberships.map((item) => item.school_id))),
     [memberships],
   )
+  const focusedClassId = searchParams.get('classId')
+
+  const visibleAssignments = useMemo(
+    () =>
+      focusedClassId
+        ? assignments.filter((item) => item.class_id === focusedClassId)
+        : assignments,
+    [assignments, focusedClassId],
+  )
+  const focusedClassName =
+    visibleAssignments[0]?.className ??
+    assignments.find((item) => item.class_id === focusedClassId)?.className ??
+    '当前班级'
 
   const selectedAssignment = useMemo(
-    () => assignments.find((item) => item.id === selectedAssignmentId) ?? assignments[0] ?? null,
-    [assignments, selectedAssignmentId],
+    () =>
+      visibleAssignments.find((item) => item.id === selectedAssignmentId) ??
+      visibleAssignments[0] ??
+      null,
+    [selectedAssignmentId, visibleAssignments],
   )
 
   useEffect(() => {
@@ -211,6 +230,19 @@ export function AssignmentsPage() {
     void load()
   }, [memberships, schoolIds])
 
+  useEffect(() => {
+    if (visibleAssignments.length === 0) {
+      setSelectedAssignmentId(null)
+      return
+    }
+
+    if (selectedAssignmentId && visibleAssignments.some((item) => item.id === selectedAssignmentId)) {
+      return
+    }
+
+    setSelectedAssignmentId(visibleAssignments[0].id)
+  }, [selectedAssignmentId, visibleAssignments])
+
   return (
     <div className="page-layout">
       <header className="page-header">
@@ -221,7 +253,27 @@ export function AssignmentsPage() {
         <div className="page-tag">Assignments</div>
       </header>
 
-      {assignments.length === 0 ? (
+      {focusedClassId ? (
+        <div className="filter-banner">
+          <div>
+            <strong>当前聚焦班级：{focusedClassName}</strong>
+            <span>只展示这个班级的作业，方便一路跟进到底。</span>
+          </div>
+          <button
+            className="ghost-button compact-button"
+            onClick={() => {
+              const nextParams = new URLSearchParams(searchParams)
+              nextParams.delete('classId')
+              setSearchParams(nextParams)
+            }}
+            type="button"
+          >
+            查看全部作业
+          </button>
+        </div>
+      ) : null}
+
+      {visibleAssignments.length === 0 ? (
         <div className="empty-state">当前还没有可见作业。</div>
       ) : (
         <div className="operations-workbench">
@@ -239,7 +291,7 @@ export function AssignmentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {assignments.map((item) => (
+                {visibleAssignments.map((item) => (
                   <tr
                     key={item.id}
                     className={item.id === selectedAssignment?.id ? 'data-row-active' : undefined}
@@ -325,6 +377,38 @@ export function AssignmentsPage() {
               <div className="panel-header compact">
                 <h3>未提交学员</h3>
                 <p>这是当前最需要催交的名单。</p>
+              </div>
+
+              <div className="action-button-row">
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() =>
+                    navigate(`/classes?classId=${selectedAssignment.class_id}`)
+                  }
+                  type="button"
+                >
+                  去看班级状态
+                </button>
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() =>
+                    navigate(
+                      `/students?schoolId=${selectedAssignment.school_id}&classId=${selectedAssignment.class_id}`,
+                    )
+                  }
+                  type="button"
+                >
+                  去看未交学员
+                </button>
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() =>
+                    navigate(`/teachers?schoolId=${selectedAssignment.school_id}`)
+                  }
+                  type="button"
+                >
+                  去看校区教师
+                </button>
               </div>
 
               {selectedAssignment.pendingStudentNames.length === 0 ? (
