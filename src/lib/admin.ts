@@ -86,3 +86,59 @@ export async function reassignManagedMembershipClass(
     ...payload,
   })
 }
+
+export type SchoolAiConfigSummary = {
+  schoolId: string
+  providerType: string
+  providerLabel: string
+  baseUrl: string
+  model: string
+  enabled: boolean
+  apiKeyConfigured: boolean
+  apiKeyMasked: string | null
+  updatedAt: string | null
+}
+
+export type UpsertSchoolAiConfigPayload = {
+  schoolId: string
+  providerType: string
+  providerLabel: string
+  baseUrl: string
+  model: string
+  apiKey?: string
+  enabled: boolean
+}
+
+async function invokeAdminAiConfig(body: unknown) {
+  const { data, error } = await supabase.functions.invoke('admin-ai-config', {
+    body: body as Record<string, unknown>,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  if (data?.error) {
+    throw new Error(data.error as string)
+  }
+
+  return data
+}
+
+export async function getSchoolAiConfig(schoolId: string) {
+  const data = await invokeAdminAiConfig({
+    action: 'get_config',
+    schoolId,
+  })
+
+  return (data?.config ?? null) as SchoolAiConfigSummary | null
+}
+
+export async function upsertSchoolAiConfig(payload: UpsertSchoolAiConfigPayload) {
+  const data = await invokeAdminAiConfig({
+    action: 'upsert_config',
+    ...payload,
+  })
+
+  return (data?.config ?? null) as SchoolAiConfigSummary | null
+}
