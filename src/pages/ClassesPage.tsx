@@ -71,9 +71,22 @@ export function ClassesPage() {
   )
 
   const requestedClassId = searchParams.get('classId')
+  const focusedRisk = searchParams.get('risk')
+  const visibleClasses = useMemo(
+    () =>
+      classes.filter((item) => {
+        if (focusedRisk === 'no_teacher') return item.teacherCount === 0
+        if (focusedRisk === 'no_submissions') return item.assignmentCount === 0 || item.submittedCount === 0
+        return true
+      }),
+    [classes, focusedRisk],
+  )
   const selectedClass = useMemo(
-    () => classes.find((item) => item.id === requestedClassId) ?? classes[0] ?? null,
-    [classes, requestedClassId],
+    () =>
+      visibleClasses.find((item) => item.id === requestedClassId) ??
+      visibleClasses[0] ??
+      null,
+    [requestedClassId, visibleClasses],
   )
 
   useEffect(() => {
@@ -269,13 +282,13 @@ export function ClassesPage() {
   }, [memberships, schoolIds])
 
   useEffect(() => {
-    if (classes.length === 0) return
-    if (requestedClassId && classes.some((item) => item.id === requestedClassId)) return
+    if (visibleClasses.length === 0) return
+    if (requestedClassId && visibleClasses.some((item) => item.id === requestedClassId)) return
 
     const nextParams = new URLSearchParams(searchParams)
-    nextParams.set('classId', classes[0].id)
+    nextParams.set('classId', visibleClasses[0].id)
     setSearchParams(nextParams, { replace: true })
-  }, [classes, requestedClassId, searchParams, setSearchParams])
+  }, [requestedClassId, searchParams, setSearchParams, visibleClasses])
 
   const handleCopySummary = async (classItem: ClassView) => {
     const summary = [
@@ -315,7 +328,30 @@ export function ClassesPage() {
         <div className="page-tag">Classes</div>
       </header>
 
-      {classes.length === 0 ? (
+      {focusedRisk ? (
+        <div className="filter-banner">
+          <div>
+            <strong>
+              当前聚焦：
+              {focusedRisk === 'no_teacher' ? '缺教师班级' : '无提交班级'}
+            </strong>
+            <span>这是从经营看板带过来的异常班级视角。</span>
+          </div>
+          <button
+            className="ghost-button compact-button"
+            onClick={() => {
+              const nextParams = new URLSearchParams(searchParams)
+              nextParams.delete('risk')
+              setSearchParams(nextParams)
+            }}
+            type="button"
+          >
+            查看全部班级
+          </button>
+        </div>
+      ) : null}
+
+      {visibleClasses.length === 0 ? (
         <div className="empty-state">当前还没有可见班级。</div>
       ) : (
         <div className="operations-workbench">
@@ -334,7 +370,7 @@ export function ClassesPage() {
                 </tr>
               </thead>
               <tbody>
-                {classes.map((item) => (
+                {visibleClasses.map((item) => (
                   <tr
                     key={item.id}
                     className={item.id === selectedClass?.id ? 'data-row-active' : undefined}

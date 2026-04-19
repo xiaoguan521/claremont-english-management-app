@@ -83,6 +83,7 @@ export function StudentsPage() {
   )
   const focusedSchoolId = searchParams.get('schoolId')
   const focusedClassId = searchParams.get('classId')
+  const focusedStatus = searchParams.get('status')
   const focusedSchoolName = schools.find((item) => item.id === focusedSchoolId)?.name ?? null
   const focusedClassName = classes.find((item) => item.id === focusedClassId)?.name ?? null
   const visibleStudents = useMemo(
@@ -90,9 +91,10 @@ export function StudentsPage() {
       students.filter((item) => {
         if (focusedSchoolId && item.schoolId !== focusedSchoolId) return false
         if (focusedClassId && item.classId !== focusedClassId) return false
+        if (focusedStatus && item.status !== focusedStatus) return false
         return true
       }),
-    [focusedClassId, focusedSchoolId, students],
+    [focusedClassId, focusedSchoolId, focusedStatus, students],
   )
 
   useEffect(() => {
@@ -352,15 +354,21 @@ export function StudentsPage() {
         <div className="page-tag">Students</div>
       </header>
 
-      {focusedSchoolName || focusedClassName ? (
+      {focusedSchoolName || focusedClassName || focusedStatus ? (
         <div className="filter-banner">
           <div>
             <strong>
               当前聚焦：
-              {focusedClassName ? `${focusedClassName}` : focusedSchoolName}
+              {focusedStatus === 'invited'
+                ? '待激活学员'
+                : focusedClassName
+                  ? `${focusedClassName}`
+                  : focusedSchoolName}
             </strong>
             <span>
-              {focusedClassName
+              {focusedStatus === 'invited'
+                ? '这里只显示待激活状态的学员账号。'
+                : focusedClassName
                 ? '只展示这个班级的学员，方便继续处理催交或账号问题。'
                 : '只展示当前校区的学员。'}
             </span>
@@ -371,6 +379,7 @@ export function StudentsPage() {
               const nextParams = new URLSearchParams(searchParams)
               nextParams.delete('schoolId')
               nextParams.delete('classId')
+              nextParams.delete('status')
               setSearchParams(nextParams)
             }}
             type="button"

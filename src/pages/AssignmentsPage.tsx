@@ -67,13 +67,16 @@ export function AssignmentsPage() {
     [memberships],
   )
   const focusedClassId = searchParams.get('classId')
+  const focusedRisk = searchParams.get('risk')
 
   const visibleAssignments = useMemo(
     () =>
-      focusedClassId
-        ? assignments.filter((item) => item.class_id === focusedClassId)
-        : assignments,
-    [assignments, focusedClassId],
+      assignments.filter((item) => {
+        if (focusedClassId && item.class_id !== focusedClassId) return false
+        if (focusedRisk === 'overdue' && !item.overdue) return false
+        return true
+      }),
+    [assignments, focusedClassId, focusedRisk],
   )
   const focusedClassName =
     visibleAssignments[0]?.className ??
@@ -289,17 +292,26 @@ export function AssignmentsPage() {
         <div className="page-tag">Assignments</div>
       </header>
 
-      {focusedClassId ? (
+      {focusedClassId || focusedRisk ? (
         <div className="filter-banner">
           <div>
-            <strong>当前聚焦班级：{focusedClassName}</strong>
-            <span>只展示这个班级的作业，方便一路跟进到底。</span>
+            <strong>
+              {focusedRisk === 'overdue'
+                ? '当前聚焦：逾期作业'
+                : `当前聚焦班级：${focusedClassName}`}
+            </strong>
+            <span>
+              {focusedRisk === 'overdue'
+                ? '这里只显示已逾期的作业，方便优先处理。'
+                : '只展示这个班级的作业，方便一路跟进到底。'}
+            </span>
           </div>
           <button
             className="ghost-button compact-button"
             onClick={() => {
               const nextParams = new URLSearchParams(searchParams)
               nextParams.delete('classId')
+              nextParams.delete('risk')
               setSearchParams(nextParams)
             }}
             type="button"
