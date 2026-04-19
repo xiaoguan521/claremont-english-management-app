@@ -436,6 +436,33 @@
   font-weight: 700;
 }
 
+.success-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.success-actions span {
+  display: block;
+  margin-top: 4px;
+  color: #166534;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.compact-button {
+  width: auto;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
 @media (max-width: 1180px) {
   .metrics-grid,
   .two-column {

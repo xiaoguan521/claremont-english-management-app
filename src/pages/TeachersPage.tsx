@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 
-import { createManagedUser } from '../lib/admin'
+import {
+  createManagedUser,
+  resetManagedUserPassword,
+  setManagedMembershipStatus,
+} from '../lib/admin'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 
@@ -9,6 +13,7 @@ type MembershipRow = {
   user_id: string
   school_id: string
   role: string
+  status: 'active' | 'invited' | 'disabled'
 }
 
 type ProfileRow = {
@@ -19,15 +24,25 @@ type ProfileRow = {
 
 type TeacherView = {
   id: string
+  userId: string
   name: string
   phone: string
   role: string
+  schoolId: string
   schoolName: string
+  status: 'active' | 'invited' | 'disabled'
 }
 
 type SchoolOption = {
   id: string
   name: string
+}
+
+type CreatedAccount = {
+  displayName: string
+  email: string
+  password: string
+  schoolName: string
 }
 
 export function TeachersPage() {
@@ -38,6 +53,8 @@ export function TeachersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
+  const [lastCreated, setLastCreated] = useState<CreatedAccount | null>(null)
+  const [workingId, setWorkingId] = useState<string | null>(null)
   const [form, setForm] = useState({
     schoolId: '',
     displayName: '',
@@ -63,15 +80,13 @@ export function TeachersPage() {
       const [membershipResponse, schoolsResponse] = await Promise.all([
         supabase
           .from('memberships')
-          .select('id, user_id, school_id, role')
+          .select('id, user_id, school_id, role, status')
           .in('school_id', schoolIds)
-          .in('role', ['teacher', 'school_admin'])
-          .eq('status', 'active'),
+          .in('role', ['teacher', 'school_admin']),
         supabase.from('schools').select('id, name').in('id', schoolIds),
       ])
 
       if (membershipResponse.error || schoolsResponse.error) {
-        console.error(membershipResponse.error || schoolsResponse.error)
         return
       }
 
@@ -91,7 +106,6 @@ export function TeachersPage() {
         .in('id', userIds)
 
       if (profileError) {
-        console.error(profileError)
         return
       }
 
@@ -103,10 +117,13 @@ export function TeachersPage() {
       setTeachers(
         ((membershipResponse.data ?? []) as MembershipRow[]).map((item) => ({
           id: item.id,
+          userId: item.user_id,
           name: profileMap.get(item.user_id)?.display_name ?? '未命名账号',
           phone: profileMap.get(item.user_id)?.phone ?? '-',
           role: item.role === 'school_admin' ? '校区管理员' : '教师',
+          schoolId: item.school_id,
           schoolName: schoolMap.get(item.school_id) ?? item.school_id,
+          status: item.status,
         })),
       )
     }
@@ -119,6 +136,7 @@ export function TeachersPage() {
     setSubmitting(true)
     setError(null)
     setFeedback(null)
+    setLastCreated(null)
 
     try {
       await createManagedUser({
@@ -130,6 +148,14 @@ export function TeachersPage() {
         role: form.role as 'teacher' | 'school_admin',
       })
 
+      const schoolName =
+        schools.find((item) => item.id === form.schoolId)?.name ?? '当前校区'
+      setLastCreated({
+        displayName: form.displayName.trim(),
+        email: form.email.trim(),
+        password: form.password,
+        schoolName,
+      })
       setFeedback('教师账号已创建并绑定到校区。')
       setForm((current) => ({
         ...current,
@@ -149,12 +175,80 @@ export function TeachersPage() {
     }
   }
 
+  const handleCopyAccount = async (account: CreatedAccount) => {
+    const content = [
+      `姓名：${account.displayName}`,
+      `登录邮箱：${account.email}`,
+      `初始密码：${account.password}`,
+      `所属校区：${account.schoolName}`,
+    ].join('\n')
+
+    await navigator.clipboard.writeText(content)
+    setFeedback(`已复制 ${account.displayName} 的账号信息。`)
+  }
+
+  const handleResetPassword = async (teacher: TeacherView) => {
+    const temporaryPassword = buildTemporaryPassword('Tea')
+    setWorkingId(teacher.id)
+    setError(null)
+    setFeedback(null)
+
+    try {
+      await resetManagedUserPassword({
+        schoolId: teacher.schoolId,
+        userId: teacher.userId,
+        temporaryPassword,
+      })
+      await navigator.clipboard.writeText(
+        [`姓名：${teacher.name}`, `临时密码：${temporaryPassword}`, `所属校区：${teacher.schoolName}`].join(
+          '\n',
+        ),
+      )
+      setFeedback(`已重置 ${teacher.name} 的密码，并复制到剪贴板。`)
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : '重置密码失败。',
+      )
+    } finally {
+      setWorkingId(null)
+    }
+  }
+
+  const handleToggleStatus = async (teacher: TeacherView) => {
+    const nextStatus = teacher.status === 'disabled' ? 'active' : 'disabled'
+    setWorkingId(teacher.id)
+    setError(null)
+    setFeedback(null)
+
+    try {
+      await setManagedMembershipStatus({
+        schoolId: teacher.schoolId,
+        membershipId: teacher.id,
+        nextStatus,
+      })
+      setTeachers((current) =>
+        current.map((item) =>
+          item.id === teacher.id ? { ...item, status: nextStatus } : item,
+        ),
+      )
+      setFeedback(
+        `${teacher.name} 已${nextStatus === 'active' ? '启用' : '停用'}。`,
+      )
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : '更新账号状态失败。',
+      )
+    } finally {
+      setWorkingId(null)
+    }
+  }
+
   return (
     <div className="page-layout">
       <header className="page-header">
         <div>
           <h2>教师档案</h2>
-          <p>今天先把校区管理员创建教师账号的动作接起来，后面再补更细的权限配置。</p>
+          <p>现在除了建号，还可以重置密码、停用或重新启用教师与校区管理员账号。</p>
         </div>
         <div className="page-tag">Teachers</div>
       </header>
@@ -247,6 +341,23 @@ export function TeachersPage() {
 
           {error ? <div className="error-banner span-2">{error}</div> : null}
           {feedback ? <div className="success-banner span-2">{feedback}</div> : null}
+          {lastCreated ? (
+            <div className="success-banner span-2 success-actions">
+              <div>
+                <strong>{lastCreated.displayName}</strong>
+                <span>
+                  {lastCreated.email} · {lastCreated.schoolName}
+                </span>
+              </div>
+              <button
+                className="ghost-button compact-button"
+                onClick={() => void handleCopyAccount(lastCreated)}
+                type="button"
+              >
+                复制账号信息
+              </button>
+            </div>
+          ) : null}
 
           <div className="form-actions span-2">
             <button className="primary-button" disabled={submitting} type="submit">
@@ -264,6 +375,8 @@ export function TeachersPage() {
               <th>手机号</th>
               <th>角色</th>
               <th>校区</th>
+              <th>状态</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -273,6 +386,33 @@ export function TeachersPage() {
                 <td>{item.phone}</td>
                 <td>{item.role}</td>
                 <td>{item.schoolName}</td>
+                <td>
+                  <span
+                    className={`status-pill ${item.status === 'disabled' ? 'draft' : 'active'}`}
+                  >
+                    {formatMembershipStatus(item.status)}
+                  </span>
+                </td>
+                <td>
+                  <div className="table-actions">
+                    <button
+                      className="ghost-button compact-button"
+                      disabled={workingId === item.id}
+                      onClick={() => void handleResetPassword(item)}
+                      type="button"
+                    >
+                      重置密码
+                    </button>
+                    <button
+                      className="ghost-button compact-button"
+                      disabled={workingId === item.id}
+                      onClick={() => void handleToggleStatus(item)}
+                      type="button"
+                    >
+                      {item.status === 'disabled' ? '启用' : '停用'}
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -280,4 +420,14 @@ export function TeachersPage() {
       </div>
     </div>
   )
+}
+
+function buildTemporaryPassword(prefix: string) {
+  return `${prefix}@${Math.random().toString(36).slice(2, 6)}${Date.now().toString().slice(-4)}`
+}
+
+function formatMembershipStatus(status: TeacherView['status']) {
+  if (status === 'disabled') return '已停用'
+  if (status === 'invited') return '待激活'
+  return '正常'
 }
