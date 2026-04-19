@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAuth } from '../lib/auth'
+import { copyText, downloadCsv } from '../lib/ops'
 import { supabase } from '../lib/supabase'
 
 type AssignmentRow = {
@@ -243,6 +244,41 @@ export function AssignmentsPage() {
     setSelectedAssignmentId(visibleAssignments[0].id)
   }, [selectedAssignmentId, visibleAssignments])
 
+  const handleCopyReminder = async (assignment: AssignmentView) => {
+    const reminder = [
+      `请协助跟进作业：${assignment.title}`,
+      `班级：${assignment.className}`,
+      `校区：${assignment.schoolName}`,
+      assignment.due_at
+        ? `截止时间：${new Date(assignment.due_at).toLocaleString()}`
+        : '截止时间：暂未设置',
+      `未提交学员：${
+        assignment.pendingStudentNames.length > 0
+          ? assignment.pendingStudentNames.join('、')
+          : '当前无未提交学员'
+      }`,
+      '请班主任或家长尽快提醒学员完成提交。',
+    ].join('\n')
+
+    void copyText(reminder)
+  }
+
+  const handleExportPendingList = (assignment: AssignmentView) => {
+    const rows = [
+      ['作业', '班级', '校区', '截止时间', '学员姓名', '状态'],
+      ...assignment.pendingStudentNames.map((name) => [
+        assignment.title,
+        assignment.className,
+        assignment.schoolName,
+        assignment.due_at ? new Date(assignment.due_at).toLocaleString() : '未设置',
+        name,
+        '未提交',
+      ]),
+    ]
+
+    downloadCsv(`${assignment.className}-${assignment.title}-未交名单.csv`, rows)
+  }
+
   return (
     <div className="page-layout">
       <header className="page-header">
@@ -380,6 +416,20 @@ export function AssignmentsPage() {
               </div>
 
               <div className="action-button-row">
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() => void handleCopyReminder(selectedAssignment)}
+                  type="button"
+                >
+                  复制催办文案
+                </button>
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() => handleExportPendingList(selectedAssignment)}
+                  type="button"
+                >
+                  导出未交名单
+                </button>
                 <button
                   className="ghost-button compact-button"
                   onClick={() =>

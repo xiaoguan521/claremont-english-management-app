@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { useAuth } from '../lib/auth'
+import { copyText, downloadCsv } from '../lib/ops'
 import { supabase } from '../lib/supabase'
 
 type ClassRecord = {
@@ -17,9 +18,15 @@ type SchoolRow = {
 }
 
 type MembershipRow = {
+  user_id: string
   class_id: string | null
   role: string
   status: 'active' | 'invited' | 'disabled'
+}
+
+type ProfileRow = {
+  id: string
+  display_name: string | null
 }
 
 type AssignmentRow = {
@@ -48,6 +55,8 @@ type ClassView = ClassRecord & {
   pendingSubmissionCount: number
   riskLabel: string
   latestAssignmentTitle: string
+  teacherNames: string[]
+  studentNames: string[]
 }
 
 export function ClassesPage() {
@@ -84,7 +93,7 @@ export function ClassesPage() {
           supabase.from('schools').select('id, name').in('id', schoolIds),
           supabase
             .from('memberships')
-            .select('class_id, role, status')
+            .select('user_id, class_id, role, status')
             .in('school_id', schoolIds)
             .in('role', ['teacher', 'student'])
             .eq('status', 'active'),
@@ -106,17 +115,25 @@ export function ClassesPage() {
       const classRows = (classesResponse.data ?? []) as ClassRecord[]
       const assignments = (assignmentsResponse.data ?? []) as AssignmentRow[]
       const assignmentIds = assignments.map((item) => item.id)
+      const membershipRows = (membershipsResponse.data ?? []) as MembershipRow[]
+      const memberUserIds = Array.from(new Set(membershipRows.map((item) => item.user_id)))
       const { data: submissionsData, error: submissionsError } = assignmentIds.length
         ? await supabase
             .from('submissions')
             .select('assignment_id, status')
             .in('assignment_id', assignmentIds)
         : { data: [], error: null }
+      const { data: profileRows, error: profileError } = memberUserIds.length
+        ? await supabase.from('profiles').select('id, display_name').in('id', memberUserIds)
+        : { data: [], error: null }
 
-      if (submissionsError) return
+      if (submissionsError || profileError) return
 
       const schoolMap = new Map(
         ((schoolsResponse.data ?? []) as SchoolRow[]).map((item) => [item.id, item.name]),
+      )
+      const profileMap = new Map(
+        ((profileRows ?? []) as ProfileRow[]).map((item) => [item.id, item.display_name ?? item.id]),
       )
 
       const counters = new Map<
@@ -128,10 +145,12 @@ export function ClassesPage() {
           publishedAssignmentCount: number
           overdueAssignmentCount: number
           latestAssignmentTitle: string
+          teacherNames: string[]
+          studentNames: string[]
         }
       >()
 
-      ;((membershipsResponse.data ?? []) as MembershipRow[]).forEach((item) => {
+      membershipRows.forEach((item) => {
         if (!item.class_id) return
 
         const current = counters.get(item.class_id) ?? {
@@ -141,10 +160,18 @@ export function ClassesPage() {
           publishedAssignmentCount: 0,
           overdueAssignmentCount: 0,
           latestAssignmentTitle: '暂无作业',
+          teacherNames: [],
+          studentNames: [],
         }
 
-        if (item.role === 'teacher') current.teacherCount += 1
-        if (item.role === 'student') current.studentCount += 1
+        if (item.role === 'teacher') {
+          current.teacherCount += 1
+          current.teacherNames.push(profileMap.get(item.user_id) ?? item.user_id)
+        }
+        if (item.role === 'student') {
+          current.studentCount += 1
+          current.studentNames.push(profileMap.get(item.user_id) ?? item.user_id)
+        }
         counters.set(item.class_id, current)
       })
 
@@ -157,6 +184,8 @@ export function ClassesPage() {
           publishedAssignmentCount: 0,
           overdueAssignmentCount: 0,
           latestAssignmentTitle: '暂无作业',
+          teacherNames: [],
+          studentNames: [],
         }
 
         current.assignmentCount += 1
@@ -194,6 +223,8 @@ export function ClassesPage() {
             publishedAssignmentCount: 0,
             overdueAssignmentCount: 0,
             latestAssignmentTitle: '暂无作业',
+            teacherNames: [],
+            studentNames: [],
           }
           const submissionStats = submissionStatsByClass.get(item.id) ?? {
             submittedCount: 0,
@@ -227,6 +258,8 @@ export function ClassesPage() {
                   : 0,
             }),
             latestAssignmentTitle: current.latestAssignmentTitle,
+            teacherNames: current.teacherNames,
+            studentNames: current.studentNames,
           }
         }),
       )
@@ -243,6 +276,34 @@ export function ClassesPage() {
     nextParams.set('classId', classes[0].id)
     setSearchParams(nextParams, { replace: true })
   }, [classes, requestedClassId, searchParams, setSearchParams])
+
+  const handleCopySummary = async (classItem: ClassView) => {
+    const summary = [
+      `班级：${classItem.name}`,
+      `校区：${classItem.schoolName}`,
+      `教师覆盖：${classItem.teacherCount} 人`,
+      `学员规模：${classItem.studentCount} 人`,
+      `作业数：${classItem.assignmentCount} 份`,
+      `提交率：${classItem.assignmentCount > 0 ? `${classItem.submissionRate}%` : '暂无'}`,
+      `逾期作业：${classItem.overdueAssignmentCount} 份`,
+      `最近作业：${classItem.latestAssignmentTitle}`,
+    ].join('\n')
+
+    void copyText(summary)
+  }
+
+  const handleExportMembers = (classItem: ClassView, role: 'teacher' | 'student') => {
+    const isTeacher = role === 'teacher'
+    const names = isTeacher ? classItem.teacherNames : classItem.studentNames
+    const rows = [
+      ['班级', '校区', '角色', '姓名'],
+      ...names.map((name) => [classItem.name, classItem.schoolName, isTeacher ? '教师' : '学员', name]),
+    ]
+    downloadCsv(
+      `${classItem.name}-${isTeacher ? '教师名单' : '学员名单'}.csv`,
+      rows,
+    )
+  }
 
   return (
     <div className="page-layout">
@@ -366,6 +427,30 @@ export function ClassesPage() {
               <div className="panel-header compact">
                 <h3>继续处理</h3>
                 <p>按当前班级上下文跳到对应页面，不需要重新筛选。</p>
+              </div>
+
+              <div className="action-button-row">
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() => void handleCopySummary(selectedClass)}
+                  type="button"
+                >
+                  复制班级摘要
+                </button>
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() => handleExportMembers(selectedClass, 'student')}
+                  type="button"
+                >
+                  导出学员名单
+                </button>
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() => handleExportMembers(selectedClass, 'teacher')}
+                  type="button"
+                >
+                  导出教师名单
+                </button>
               </div>
 
               <div className="action-button-row">
