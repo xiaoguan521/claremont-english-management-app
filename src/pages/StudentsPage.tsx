@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 
 import {
   createManagedUser,
+  reassignManagedMembershipClass,
   resetManagedUserPassword,
   setManagedMembershipStatus,
 } from '../lib/admin'
@@ -66,6 +67,7 @@ export function StudentsPage() {
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [lastCreated, setLastCreated] = useState<CreatedAccount | null>(null)
+  const [studentClassDrafts, setStudentClassDrafts] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
     schoolId: '',
     classId: '',
@@ -306,6 +308,40 @@ export function StudentsPage() {
     }
   }
 
+  const handleMoveStudent = async (student: StudentView) => {
+    const nextClassId = studentClassDrafts[student.id] ?? student.classId ?? ''
+    setWorkingId(student.id)
+    setError(null)
+    setFeedback(null)
+
+    try {
+      await reassignManagedMembershipClass({
+        schoolId: student.schoolId,
+        membershipId: student.id,
+        classId: nextClassId || null,
+      })
+
+      const nextClassName = nextClassId
+        ? classes.find((item) => item.id === nextClassId)?.name ?? nextClassId
+        : '未分配班级'
+
+      setStudents((current) =>
+        current.map((item) =>
+          item.id === student.id
+            ? { ...item, classId: nextClassId || null, className: nextClassName }
+            : item,
+        ),
+      )
+      setFeedback(`${student.name} 已更新到新的班级归属。`)
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : '学生调班失败。',
+      )
+    } finally {
+      setWorkingId(null)
+    }
+  }
+
   return (
     <div className="page-layout">
       <header className="page-header">
@@ -505,6 +541,34 @@ export function StudentsPage() {
                       type="button"
                     >
                       {item.status === 'disabled' ? '启用' : '停用'}
+                    </button>
+                    <select
+                      className="table-action-select"
+                      disabled={workingId === item.id}
+                      onChange={(event) =>
+                        setStudentClassDrafts((current) => ({
+                          ...current,
+                          [item.id]: event.target.value,
+                        }))
+                      }
+                      value={studentClassDrafts[item.id] ?? item.classId ?? ''}
+                    >
+                      <option value="">未分配班级</option>
+                      {classes
+                        .filter((classItem) => classItem.school_id === item.schoolId)
+                        .map((classItem) => (
+                          <option key={classItem.id} value={classItem.id}>
+                            {classItem.name}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      className="ghost-button compact-button"
+                      disabled={workingId === item.id}
+                      onClick={() => void handleMoveStudent(item)}
+                      type="button"
+                    >
+                      调班
                     </button>
                   </div>
                 </td>

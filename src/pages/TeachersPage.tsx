@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 
 import {
   createManagedUser,
+  reassignManagedMembershipClass,
   resetManagedUserPassword,
   setManagedMembershipStatus,
 } from '../lib/admin'
@@ -13,6 +14,7 @@ type MembershipRow = {
   id: string
   user_id: string
   school_id: string
+  class_id: string | null
   role: string
   status: 'active' | 'invited' | 'disabled'
 }
@@ -29,6 +31,9 @@ type TeacherView = {
   name: string
   phone: string
   role: string
+  roleKey: 'teacher' | 'school_admin'
+  classId: string | null
+  className: string
   schoolId: string
   schoolName: string
   status: 'active' | 'invited' | 'disabled'
@@ -37,6 +42,12 @@ type TeacherView = {
 type SchoolOption = {
   id: string
   name: string
+}
+
+type ClassOption = {
+  id: string
+  name: string
+  school_id: string
 }
 
 type CreatedAccount = {
@@ -51,12 +62,14 @@ export function TeachersPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [teachers, setTeachers] = useState<TeacherView[]>([])
   const [schools, setSchools] = useState<SchoolOption[]>([])
+  const [classes, setClasses] = useState<ClassOption[]>([])
   const [refreshToken, setRefreshToken] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [lastCreated, setLastCreated] = useState<CreatedAccount | null>(null)
   const [workingId, setWorkingId] = useState<string | null>(null)
+  const [teacherClassDrafts, setTeacherClassDrafts] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
     schoolId: '',
     displayName: '',
@@ -85,24 +98,33 @@ export function TeachersPage() {
       if (schoolIds.length === 0) {
         setTeachers([])
         setSchools([])
+        setClasses([])
         return
       }
 
-      const [membershipResponse, schoolsResponse] = await Promise.all([
+      const [membershipResponse, schoolsResponse, classesResponse] = await Promise.all([
         supabase
           .from('memberships')
-          .select('id, user_id, school_id, role, status')
+          .select('id, user_id, school_id, class_id, role, status')
           .in('school_id', schoolIds)
           .in('role', ['teacher', 'school_admin']),
         supabase.from('schools').select('id, name').in('id', schoolIds),
+        supabase
+          .from('classes')
+          .select('id, name, school_id')
+          .in('school_id', schoolIds)
+          .eq('status', 'active')
+          .order('name'),
       ])
 
-      if (membershipResponse.error || schoolsResponse.error) {
+      if (membershipResponse.error || schoolsResponse.error || classesResponse.error) {
         return
       }
 
       const nextSchools = (schoolsResponse.data ?? []) as SchoolOption[]
+      const nextClasses = (classesResponse.data ?? []) as ClassOption[]
       setSchools(nextSchools)
+      setClasses(nextClasses)
       if (nextSchools.length > 0 && !form.schoolId) {
         setForm((current) => ({ ...current, schoolId: nextSchools[0].id }))
       }
@@ -124,6 +146,7 @@ export function TeachersPage() {
         ((profileRows ?? []) as ProfileRow[]).map((item) => [item.id, item]),
       )
       const schoolMap = new Map(nextSchools.map((item) => [item.id, item.name]))
+      const classMap = new Map(nextClasses.map((item) => [item.id, item.name]))
 
       setTeachers(
         ((membershipResponse.data ?? []) as MembershipRow[]).map((item) => ({
@@ -131,7 +154,10 @@ export function TeachersPage() {
           userId: item.user_id,
           name: profileMap.get(item.user_id)?.display_name ?? '未命名账号',
           phone: profileMap.get(item.user_id)?.phone ?? '-',
+          roleKey: item.role as 'teacher' | 'school_admin',
           role: item.role === 'school_admin' ? '校区管理员' : '教师',
+          classId: item.class_id,
+          className: item.class_id ? classMap.get(item.class_id) ?? item.class_id : '未分配班级',
           schoolId: item.school_id,
           schoolName: schoolMap.get(item.school_id) ?? item.school_id,
           status: item.status,
@@ -141,6 +167,9 @@ export function TeachersPage() {
 
     void load()
   }, [form.schoolId, refreshToken, schoolIds])
+
+  const getAvailableClasses = (schoolId: string) =>
+    classes.filter((item) => item.school_id === schoolId)
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -248,6 +277,41 @@ export function TeachersPage() {
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : '更新账号状态失败。',
+      )
+    } finally {
+      setWorkingId(null)
+    }
+  }
+
+  const handleReassignClass = async (teacher: TeacherView) => {
+    if (teacher.roleKey !== 'teacher') return
+
+    const nextClassId = teacherClassDrafts[teacher.id] ?? teacher.classId ?? ''
+    setWorkingId(teacher.id)
+    setError(null)
+    setFeedback(null)
+
+    try {
+      await reassignManagedMembershipClass({
+        schoolId: teacher.schoolId,
+        membershipId: teacher.id,
+        classId: nextClassId || null,
+      })
+      const nextClassName = nextClassId
+        ? classes.find((item) => item.id === nextClassId)?.name ?? nextClassId
+        : '未分配班级'
+
+      setTeachers((current) =>
+        current.map((item) =>
+          item.id === teacher.id
+            ? { ...item, classId: nextClassId || null, className: nextClassName }
+            : item,
+        ),
+      )
+      setFeedback(`${teacher.name} 的班级归属已更新。`)
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : '调整教师班级失败。',
       )
     } finally {
       setWorkingId(null)
@@ -405,6 +469,7 @@ export function TeachersPage() {
               <th>姓名</th>
               <th>手机号</th>
               <th>角色</th>
+              <th>当前班级</th>
               <th>校区</th>
               <th>状态</th>
               <th>操作</th>
@@ -416,6 +481,7 @@ export function TeachersPage() {
                 <td>{item.name}</td>
                 <td>{item.phone}</td>
                 <td>{item.role}</td>
+                <td>{item.className}</td>
                 <td>{item.schoolName}</td>
                 <td>
                   <span
@@ -442,6 +508,36 @@ export function TeachersPage() {
                     >
                       {item.status === 'disabled' ? '启用' : '停用'}
                     </button>
+                    {item.roleKey === 'teacher' ? (
+                      <>
+                        <select
+                          className="table-action-select"
+                          disabled={workingId === item.id}
+                          onChange={(event) =>
+                            setTeacherClassDrafts((current) => ({
+                              ...current,
+                              [item.id]: event.target.value,
+                            }))
+                          }
+                          value={teacherClassDrafts[item.id] ?? item.classId ?? ''}
+                        >
+                          <option value="">未分配班级</option>
+                          {getAvailableClasses(item.schoolId).map((classItem) => (
+                            <option key={classItem.id} value={classItem.id}>
+                              {classItem.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="ghost-button compact-button"
+                          disabled={workingId === item.id}
+                          onClick={() => void handleReassignClass(item)}
+                          type="button"
+                        >
+                          保存班级
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </td>
               </tr>

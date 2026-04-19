@@ -548,6 +548,16 @@
   gap: 10px;
 }
 
+.table-action-select {
+  min-width: 148px;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: white;
+  font-size: 13px;
+  color: #0f172a;
+}
+
 .compact-button {
   width: auto;
   padding: 10px 12px;

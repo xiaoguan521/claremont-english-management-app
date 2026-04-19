@@ -38,6 +38,12 @@ export type ResetManagedUserPasswordPayload = {
   temporaryPassword: string
 }
 
+export type ReassignManagedMembershipClassPayload = {
+  schoolId: string
+  membershipId: string
+  classId: string | null
+}
+
 async function invokeAdminManager(body: unknown) {
   const { data, error } = await supabase.functions.invoke('admin-manage-user', {
     body: body as Record<string, unknown>,
@@ -68,6 +74,15 @@ export async function resetManagedUserPassword(
 ) {
   return invokeAdminManager({
     action: 'reset_password',
+    ...payload,
+  })
+}
+
+export async function reassignManagedMembershipClass(
+  payload: ReassignManagedMembershipClassPayload,
+) {
+  return invokeAdminManager({
+    action: 'reassign_membership_class',
     ...payload,
   })
 }
