@@ -481,6 +481,33 @@
   gap: 12px;
 }
 
+.selection-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(239, 246, 255, 0.78);
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.selection-item {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.selection-item input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+}
+
 .action-button-row {
   display: flex;
   flex-wrap: wrap;

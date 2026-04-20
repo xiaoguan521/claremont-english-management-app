@@ -50,6 +50,13 @@ type ProfileRow = {
   display_name: string | null
 }
 
+type AiFailedSubmissionRow = {
+  submissionId: string
+  studentId: string
+  studentName: string
+  errorMessage: string | null
+}
+
 type AssignmentView = AssignmentRow & {
   className: string
   schoolName: string
@@ -64,6 +71,7 @@ type AssignmentView = AssignmentRow & {
   aiProcessingCount: number
   aiLastError: string | null
   aiFailedStudentNames: string[]
+  aiFailedSubmissions: AiFailedSubmissionRow[]
   riskLabel: string
 }
 
@@ -76,6 +84,7 @@ export function AssignmentsPage() {
   const [actionPending, setActionPending] = useState<'retry' | 'process' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
+  const [selectedFailedSubmissionIds, setSelectedFailedSubmissionIds] = useState<string[]>([])
 
   const schoolIds = useMemo(
     () => Array.from(new Set(memberships.map((item) => item.school_id))),
@@ -214,6 +223,7 @@ export function AssignmentsPage() {
       const aiProcessingCountByAssignment = new Map<string, number>()
       const aiLastErrorByAssignment = new Map<string, string | null>()
       const aiFailedStudentNamesByAssignment = new Map<string, string[]>()
+      const aiFailedSubmissionsByAssignment = new Map<string, AiFailedSubmissionRow[]>()
 
       submissions.forEach((item) => {
         if (item.status === 'draft') return
@@ -242,6 +252,15 @@ export function AssignmentsPage() {
           const currentNames = aiFailedStudentNamesByAssignment.get(item.assignment_id) ?? []
           currentNames.push(profileMap.get(item.student_id) ?? item.student_id)
           aiFailedStudentNamesByAssignment.set(item.assignment_id, currentNames)
+
+          const failedRows = aiFailedSubmissionsByAssignment.get(item.assignment_id) ?? []
+          failedRows.push({
+            submissionId: item.id,
+            studentId: item.student_id,
+            studentName: profileMap.get(item.student_id) ?? item.student_id,
+            errorMessage: latestJob.last_error ?? null,
+          })
+          aiFailedSubmissionsByAssignment.set(item.assignment_id, failedRows)
         }
 
         if (
@@ -289,6 +308,7 @@ export function AssignmentsPage() {
           aiProcessingCount,
           aiLastError: aiLastErrorByAssignment.get(item.id) ?? null,
           aiFailedStudentNames: aiFailedStudentNamesByAssignment.get(item.id) ?? [],
+          aiFailedSubmissions: aiFailedSubmissionsByAssignment.get(item.id) ?? [],
           riskLabel: buildRiskLabel({
             overdue,
             teacherCount,
@@ -314,6 +334,7 @@ export function AssignmentsPage() {
   useEffect(() => {
     if (visibleAssignments.length === 0) {
       setSelectedAssignmentId(null)
+      setSelectedFailedSubmissionIds([])
       return
     }
 
@@ -323,6 +344,21 @@ export function AssignmentsPage() {
 
     setSelectedAssignmentId(visibleAssignments[0].id)
   }, [selectedAssignmentId, visibleAssignments])
+
+  useEffect(() => {
+    if (!selectedAssignment) {
+      setSelectedFailedSubmissionIds([])
+      return
+    }
+
+    setSelectedFailedSubmissionIds((current) =>
+      current.filter((submissionId) =>
+        selectedAssignment.aiFailedSubmissions.some(
+          (item) => item.submissionId === submissionId,
+        ),
+      ),
+    )
+  }, [selectedAssignment])
 
   const handleCopyAiFailureSummary = async (assignment: AssignmentView) => {
     const summary = [
@@ -418,6 +454,52 @@ export function AssignmentsPage() {
     } finally {
       setActionPending(null)
     }
+  }
+
+  const handleRetrySelectedFailedReviews = async (assignment: AssignmentView) => {
+    if (selectedFailedSubmissionIds.length === 0) return
+
+    setActionPending('retry')
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      const data = await retryFailedAiReviews({
+        schoolId: assignment.school_id,
+        submissionIds: selectedFailedSubmissionIds,
+        runNow: true,
+        batchSize: Math.max(3, selectedFailedSubmissionIds.length),
+      })
+      setActionSuccess(
+        typeof data?.message === 'string'
+          ? (data.message as string)
+          : '已经重新把勾选的 AI 异常提交加入处理队列。',
+      )
+      setSelectedFailedSubmissionIds([])
+      await load()
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : '重新发起所选 AI 初评失败，请稍后再试。',
+      )
+    } finally {
+      setActionPending(null)
+    }
+  }
+
+  const toggleFailedSubmission = (submissionId: string) => {
+    setSelectedFailedSubmissionIds((current) =>
+      current.includes(submissionId)
+        ? current.filter((item) => item !== submissionId)
+        : [...current, submissionId],
+    )
+  }
+
+  const toggleAllFailedSubmissions = (assignment: AssignmentView) => {
+    const allIds = assignment.aiFailedSubmissions.map((item) => item.submissionId)
+    if (allIds.length === 0) return
+
+    setSelectedFailedSubmissionIds((current) =>
+      current.length === allIds.length ? [] : allIds,
+    )
   }
 
   const handleProcessQueue = async () => {
@@ -626,6 +708,16 @@ export function AssignmentsPage() {
                   {actionPending === 'retry' ? '重新排队中...' : '重新发起当前作业 AI 初评'}
                 </button>
                 <button
+                  className="primary-button compact-button"
+                  onClick={() => void handleRetrySelectedFailedReviews(selectedAssignment)}
+                  type="button"
+                  disabled={selectedFailedSubmissionIds.length === 0 || actionPending !== null}
+                >
+                  {actionPending === 'retry'
+                    ? '重新排队中...'
+                    : `重试勾选的 ${selectedFailedSubmissionIds.length} 条`}
+                </button>
+                <button
                   className="ghost-button compact-button"
                   onClick={() => void handleProcessQueue()}
                   type="button"
@@ -713,27 +805,53 @@ export function AssignmentsPage() {
 
               <div className="panel-header compact">
                 <h3>AI 异常学员</h3>
-                <p>这些学员已提交作业，但 AI 初评没有顺利完成。</p>
+                <p>这些学员已提交作业，但 AI 初评没有顺利完成。可以勾选部分记录单独重试。</p>
               </div>
 
-              {selectedAssignment.aiFailedStudentNames.length === 0 ? (
+              {selectedAssignment.aiFailedSubmissions.length === 0 ? (
                 <div className="empty-inline">这份作业当前没有 AI 初评异常学员。</div>
               ) : (
-                <ul className="info-list pending-list">
-                  {selectedAssignment.aiFailedStudentNames.map((name) => (
-                    <li key={`${selectedAssignment.id}-${name}`}>
+                <>
+                  <div className="selection-toolbar">
+                    <button
+                      className="ghost-button compact-button"
+                      onClick={() => toggleAllFailedSubmissions(selectedAssignment)}
+                      type="button"
+                    >
+                      {selectedFailedSubmissionIds.length ===
+                              selectedAssignment.aiFailedSubmissions.length &&
+                            selectedAssignment.aiFailedSubmissions.length > 0
+                        ? '取消全选'
+                        : '全选当前异常'}
+                    </button>
+                    <span>
+                      已选择 {selectedFailedSubmissionIds.length} /{' '}
+                      {selectedAssignment.aiFailedSubmissions.length} 条
+                    </span>
+                  </div>
+                  <ul className="info-list pending-list">
+                    {selectedAssignment.aiFailedSubmissions.map((item) => (
+                    <li key={item.submissionId}>
                       <div className="info-meta">
-                        <strong>{name}</strong>
+                        <label className="selection-item">
+                          <input
+                            type="checkbox"
+                            checked={selectedFailedSubmissionIds.includes(item.submissionId)}
+                            onChange={() => toggleFailedSubmission(item.submissionId)}
+                          />
+                          <strong>{item.studentName}</strong>
+                        </label>
                         <span>
-                          {selectedAssignment.aiLastError
-                            ? friendlyManagementAiError(selectedAssignment.aiLastError)
+                          {item.errorMessage
+                            ? friendlyManagementAiError(item.errorMessage)
                             : '建议老师优先人工查看'}
                         </span>
                       </div>
                       <span className="status-pill danger">AI 失败</span>
                     </li>
                   ))}
-                </ul>
+                  </ul>
+                </>
               )}
             </aside>
           ) : null}
