@@ -198,6 +198,14 @@
   background: rgba(239, 246, 255, 0.96);
 }
 
+.queue-health-panel {
+  gap: 18px;
+}
+
+.queue-health-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
 .metric-card span {
   color: #475569;
   font-size: 14px;

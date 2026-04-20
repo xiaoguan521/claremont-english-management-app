@@ -1,6 +1,7 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import { processAiQueueNow, scheduleAiReviewWorker } from '../lib/admin'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 
@@ -15,6 +16,14 @@ type DashboardMetrics = {
   classesWithoutSubmissions: number
   overdueAssignments: number
   aiReviewFailures: number
+}
+
+type AiQueueMetrics = {
+  pending: number
+  retrying: number
+  processing: number
+  completed: number
+  failed: number
 }
 
 type SchoolRow = {
@@ -126,14 +135,25 @@ export function DashboardPage() {
   const [assignmentIssues, setAssignmentIssues] = useState<AssignmentIssue[]>([])
   const [activationIssues, setActivationIssues] = useState<ActivationIssue[]>([])
   const [aiReviewIssues, setAiReviewIssues] = useState<AiReviewIssue[]>([])
+  const [queueMetrics, setQueueMetrics] = useState<AiQueueMetrics>({
+    pending: 0,
+    retrying: 0,
+    processing: 0,
+    completed: 0,
+    failed: 0,
+  })
+  const [queueActionPending, setQueueActionPending] = useState<'process' | 'schedule' | null>(
+    null,
+  )
+  const [queueActionError, setQueueActionError] = useState<string | null>(null)
+  const [queueActionSuccess, setQueueActionSuccess] = useState<string | null>(null)
 
   const schoolIds = useMemo(
     () => Array.from(new Set(memberships.map((item) => item.school_id))),
     [memberships],
   )
 
-  useEffect(() => {
-    const load = async () => {
+  const load = useCallback(async () => {
       if (schoolIds.length === 0) {
         setMetrics({
           schoolCount: 0,
@@ -152,6 +172,13 @@ export function DashboardPage() {
         setAssignmentIssues([])
         setActivationIssues([])
         setAiReviewIssues([])
+        setQueueMetrics({
+          pending: 0,
+          retrying: 0,
+          processing: 0,
+          completed: 0,
+          failed: 0,
+        })
         return
       }
 
@@ -248,9 +275,34 @@ export function DashboardPage() {
         { failedCount: number; lastError: string | null }
       >()
       let aiReviewFailures = 0
+      let queuePending = 0
+      let queueRetrying = 0
+      let queueProcessing = 0
+      let queueCompleted = 0
+      let queueFailed = 0
 
       submissions.forEach((submission) => {
         const latestJob = latestEvaluationJobBySubmission.get(submission.id)
+        switch (latestJob?.status) {
+          case 'pending':
+            queuePending += 1
+            break
+          case 'retrying':
+            queueRetrying += 1
+            break
+          case 'processing':
+            queueProcessing += 1
+            break
+          case 'completed':
+            queueCompleted += 1
+            break
+          case 'failed':
+            queueFailed += 1
+            break
+          default:
+            break
+        }
+
         if (latestJob?.status !== 'failed') return
 
         aiReviewFailures += 1
@@ -397,6 +449,13 @@ export function DashboardPage() {
       setClassIssues([...noTeacherClasses, ...noSubmissionClasses].slice(0, 6))
       setAssignmentIssues(overdueWatch)
       setActivationIssues(pendingActivationWatch)
+      setQueueMetrics({
+        pending: queuePending,
+        retrying: queueRetrying,
+        processing: queueProcessing,
+        completed: queueCompleted,
+        failed: queueFailed,
+      })
       setAiReviewIssues(
         assignments
           .map((assignment) => {
@@ -421,10 +480,49 @@ export function DashboardPage() {
           .sort((left, right) => (right?.failedCount ?? 0) - (left?.failedCount ?? 0))
           .slice(0, 4) as AiReviewIssue[],
       )
-    }
+    }, [memberships, schoolIds])
 
+  useEffect(() => {
     void load()
-  }, [memberships, schoolIds])
+  }, [load])
+
+  const handleProcessQueueNow = async () => {
+    setQueueActionPending('process')
+    setQueueActionError(null)
+    setQueueActionSuccess(null)
+    try {
+      const data = await processAiQueueNow({ batchSize: 5 })
+      const message =
+        typeof data?.result?.message === 'string'
+          ? (data.result.message as string)
+          : '已经手动触发一轮 AI 队列消费。'
+      setQueueActionSuccess(message)
+      await load()
+    } catch (error) {
+      setQueueActionError(error instanceof Error ? error.message : 'AI 队列处理失败，请稍后再试。')
+    } finally {
+      setQueueActionPending(null)
+    }
+  }
+
+  const handleScheduleWorker = async () => {
+    setQueueActionPending('schedule')
+    setQueueActionError(null)
+    setQueueActionSuccess(null)
+    try {
+      const data = await scheduleAiReviewWorker()
+      setQueueActionSuccess(
+        typeof data?.message === 'string'
+          ? (data.message as string)
+          : 'AI 队列 worker 已重新注册。',
+      )
+      await load()
+    } catch (error) {
+      setQueueActionError(error instanceof Error ? error.message : 'AI worker 注册失败，请稍后再试。')
+    } finally {
+      setQueueActionPending(null)
+    }
+  }
 
   return (
     <div className="page-layout">
@@ -467,6 +565,58 @@ export function DashboardPage() {
           to="/assignments?risk=ai_failed"
           value={metrics.aiReviewFailures}
         />
+      </section>
+
+      <section className="panel-card queue-health-panel">
+        <div className="panel-header">
+          <h3>AI 队列健康</h3>
+          <p>这里看后台消费状态，也能手动触发处理，避免 AI 初评任务一直堆积。</p>
+        </div>
+        <div className="metrics-grid queue-health-grid">
+          <article className="metric-card">
+            <span>待消费</span>
+            <strong>{queueMetrics.pending}</strong>
+            <p>已经入队，等待 worker 处理</p>
+          </article>
+          <article className="metric-card">
+            <span>重试中</span>
+            <strong>{queueMetrics.retrying}</strong>
+            <p>失败后重新加入队列的记录</p>
+          </article>
+          <article className="metric-card">
+            <span>处理中</span>
+            <strong>{queueMetrics.processing}</strong>
+            <p>当前正在跑转写或 AI 生成</p>
+          </article>
+          <article className="metric-card">
+            <span>失败</span>
+            <strong>{queueMetrics.failed}</strong>
+            <p>建议先让老师人工兜底，再择机重试</p>
+          </article>
+        </div>
+        <div className="action-button-row">
+          <button
+            className="primary-button compact-button"
+            onClick={() => void handleProcessQueueNow()}
+            type="button"
+            disabled={queueActionPending !== null}
+          >
+            {queueActionPending === 'process' ? '处理中...' : '立即处理一轮队列'}
+          </button>
+          <button
+            className="ghost-button compact-button"
+            onClick={() => void handleScheduleWorker()}
+            type="button"
+            disabled={queueActionPending !== null}
+          >
+            {queueActionPending === 'schedule' ? '注册中...' : '重新注册每分钟 worker'}
+          </button>
+          <Link className="quick-link" to="/assignments?risk=ai_failed">
+            去看 AI 异常作业
+          </Link>
+        </div>
+        {queueActionSuccess ? <div className="success-banner">{queueActionSuccess}</div> : null}
+        {queueActionError ? <div className="error-banner">{queueActionError}</div> : null}
       </section>
 
       <section className="two-column">

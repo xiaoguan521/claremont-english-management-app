@@ -204,3 +204,52 @@ export async function upsertSchoolSpeechConfig(
 
   return (data?.config ?? null) as SchoolSpeechConfigSummary | null
 }
+
+type ProcessAiQueuePayload = {
+  batchSize?: number
+}
+
+type RetryFailedAiReviewsPayload = {
+  schoolId: string
+  assignmentId?: string
+  runNow?: boolean
+  batchSize?: number
+}
+
+async function invokeAdminAiQueue(body: unknown) {
+  const { data, error } = await supabase.functions.invoke('admin-ai-queue', {
+    body: body as Record<string, unknown>,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  if (data?.error) {
+    throw new Error(data.error as string)
+  }
+
+  return data
+}
+
+export async function processAiQueueNow(payload: ProcessAiQueuePayload = {}) {
+  return invokeAdminAiQueue({
+    action: 'process_queue',
+    ...payload,
+  })
+}
+
+export async function scheduleAiReviewWorker() {
+  return invokeAdminAiQueue({
+    action: 'schedule_worker',
+  })
+}
+
+export async function retryFailedAiReviews(
+  payload: RetryFailedAiReviewsPayload,
+) {
+  return invokeAdminAiQueue({
+    action: 'retry_failed_reviews',
+    ...payload,
+  })
+}

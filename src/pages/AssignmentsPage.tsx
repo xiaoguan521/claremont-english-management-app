@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
+import { processAiQueueNow, retryFailedAiReviews } from '../lib/admin'
 import { useAuth } from '../lib/auth'
 import { copyText, downloadCsv } from '../lib/ops'
 import { supabase } from '../lib/supabase'
@@ -72,6 +73,9 @@ export function AssignmentsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [assignments, setAssignments] = useState<AssignmentView[]>([])
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null)
+  const [actionPending, setActionPending] = useState<'retry' | 'process' | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null)
 
   const schoolIds = useMemo(
     () => Array.from(new Set(memberships.map((item) => item.school_id))),
@@ -105,8 +109,7 @@ export function AssignmentsPage() {
     [focusedAssignmentId, selectedAssignmentId, visibleAssignments],
   )
 
-  useEffect(() => {
-    const load = async () => {
+  const load = useCallback(async () => {
       if (schoolIds.length === 0) {
         setAssignments([])
         setSelectedAssignmentId(null)
@@ -302,10 +305,11 @@ export function AssignmentsPage() {
         if (current && nextAssignments.some((item) => item.id === current)) return current
         return nextAssignments[0]?.id ?? null
       })
-    }
+    }, [memberships, schoolIds])
 
+  useEffect(() => {
     void load()
-  }, [memberships, schoolIds])
+  }, [load])
 
   useEffect(() => {
     if (visibleAssignments.length === 0) {
@@ -388,6 +392,51 @@ export function AssignmentsPage() {
     ]
 
     downloadCsv(`${assignment.className}-${assignment.title}-未交名单.csv`, rows)
+  }
+
+  const handleRetryFailedAiReviews = async (assignment: AssignmentView) => {
+    if (assignment.aiFailureCount === 0) return
+
+    setActionPending('retry')
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      const data = await retryFailedAiReviews({
+        schoolId: assignment.school_id,
+        assignmentId: assignment.id,
+        runNow: true,
+        batchSize: 5,
+      })
+      setActionSuccess(
+        typeof data?.message === 'string'
+          ? (data.message as string)
+          : '已经重新把当前作业的 AI 异常提交加入处理队列。',
+      )
+      await load()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '重新发起 AI 初评失败，请稍后再试。')
+    } finally {
+      setActionPending(null)
+    }
+  }
+
+  const handleProcessQueue = async () => {
+    setActionPending('process')
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      const data = await processAiQueueNow({ batchSize: 5 })
+      setActionSuccess(
+        typeof data?.result?.message === 'string'
+          ? (data.result.message as string)
+          : '已经手动处理一轮 AI 队列。',
+      )
+      await load()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'AI 队列处理失败，请稍后再试。')
+    } finally {
+      setActionPending(null)
+    }
   }
 
   return (
@@ -569,6 +618,22 @@ export function AssignmentsPage() {
 
               <div className="action-button-row">
                 <button
+                  className="primary-button compact-button"
+                  onClick={() => void handleRetryFailedAiReviews(selectedAssignment)}
+                  type="button"
+                  disabled={selectedAssignment.aiFailureCount === 0 || actionPending !== null}
+                >
+                  {actionPending === 'retry' ? '重新排队中...' : '重新发起当前作业 AI 初评'}
+                </button>
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() => void handleProcessQueue()}
+                  type="button"
+                  disabled={actionPending !== null}
+                >
+                  {actionPending === 'process' ? '处理中...' : '立即处理一轮队列'}
+                </button>
+                <button
                   className="ghost-button compact-button"
                   onClick={() => void handleCopyAiFailureSummary(selectedAssignment)}
                   type="button"
@@ -626,6 +691,9 @@ export function AssignmentsPage() {
                   去看校区教师
                 </button>
               </div>
+
+              {actionSuccess ? <div className="success-banner">{actionSuccess}</div> : null}
+              {actionError ? <div className="error-banner">{actionError}</div> : null}
 
               {selectedAssignment.pendingStudentNames.length === 0 ? (
                 <div className="empty-inline">这份作业当前没有未提交学员。</div>
