@@ -142,3 +142,65 @@ export async function upsertSchoolAiConfig(payload: UpsertSchoolAiConfigPayload)
 
   return (data?.config ?? null) as SchoolAiConfigSummary | null
 }
+
+export type SchoolSpeechConfigSummary = {
+  schoolId: string
+  providerType: string
+  providerLabel: string
+  baseUrl: string
+  model: string
+  voicePreset: string | null
+  responseFormat: string
+  enabled: boolean
+  apiKeyConfigured: boolean
+  apiKeyMasked: string | null
+  updatedAt: string | null
+}
+
+export type UpsertSchoolSpeechConfigPayload = {
+  schoolId: string
+  providerType: string
+  providerLabel: string
+  baseUrl: string
+  model: string
+  apiKey?: string
+  voicePreset?: string
+  responseFormat?: string
+  enabled: boolean
+}
+
+async function invokeAdminSpeechConfig(body: unknown) {
+  const { data, error } = await supabase.functions.invoke('admin-speech-config', {
+    body: body as Record<string, unknown>,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  if (data?.error) {
+    throw new Error(data.error as string)
+  }
+
+  return data
+}
+
+export async function getSchoolSpeechConfig(schoolId: string) {
+  const data = await invokeAdminSpeechConfig({
+    action: 'get_config',
+    schoolId,
+  })
+
+  return (data?.config ?? null) as SchoolSpeechConfigSummary | null
+}
+
+export async function upsertSchoolSpeechConfig(
+  payload: UpsertSchoolSpeechConfigPayload,
+) {
+  const data = await invokeAdminSpeechConfig({
+    action: 'upsert_config',
+    ...payload,
+  })
+
+  return (data?.config ?? null) as SchoolSpeechConfigSummary | null
+}
