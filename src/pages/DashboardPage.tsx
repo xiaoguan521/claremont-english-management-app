@@ -14,6 +14,7 @@ type DashboardMetrics = {
   classesWithoutTeacher: number
   classesWithoutSubmissions: number
   overdueAssignments: number
+  aiReviewFailures: number
 }
 
 type SchoolRow = {
@@ -45,13 +46,22 @@ type AssignmentRow = {
   id: string
   title: string
   class_id: string
+  school_id: string
   due_at: string | null
   status: string
 }
 
 type SubmissionRow = {
+  id: string
   assignment_id: string
   status: string
+}
+
+type EvaluationJobRow = {
+  submission_id: string
+  status: string | null
+  last_error: string | null
+  updated_at?: string
 }
 
 type SchoolWatch = {
@@ -86,6 +96,17 @@ type ActivationIssue = {
   schoolName: string
 }
 
+type AiReviewIssue = {
+  id: string
+  title: string
+  classId: string
+  className: string
+  schoolId: string
+  schoolName: string
+  failedCount: number
+  lastError: string | null
+}
+
 export function DashboardPage() {
   const { memberships } = useAuth()
   const [metrics, setMetrics] = useState<DashboardMetrics>({
@@ -98,11 +119,13 @@ export function DashboardPage() {
     classesWithoutTeacher: 0,
     classesWithoutSubmissions: 0,
     overdueAssignments: 0,
+    aiReviewFailures: 0,
   })
   const [schoolWatch, setSchoolWatch] = useState<SchoolWatch[]>([])
   const [classIssues, setClassIssues] = useState<ClassIssue[]>([])
   const [assignmentIssues, setAssignmentIssues] = useState<AssignmentIssue[]>([])
   const [activationIssues, setActivationIssues] = useState<ActivationIssue[]>([])
+  const [aiReviewIssues, setAiReviewIssues] = useState<AiReviewIssue[]>([])
 
   const schoolIds = useMemo(
     () => Array.from(new Set(memberships.map((item) => item.school_id))),
@@ -122,11 +145,13 @@ export function DashboardPage() {
           classesWithoutTeacher: 0,
           classesWithoutSubmissions: 0,
           overdueAssignments: 0,
+          aiReviewFailures: 0,
         })
         setSchoolWatch([])
         setClassIssues([])
         setAssignmentIssues([])
         setActivationIssues([])
+        setAiReviewIssues([])
         return
       }
 
@@ -162,12 +187,15 @@ export function DashboardPage() {
       const assignmentIds = assignments.map((item) => item.id)
       const userIds = Array.from(new Set(membershipRows.map((item) => item.user_id)))
 
-      const [{ data: submissionData, error: submissionError }, { data: profileRows, error: profileError }] =
+      const [
+        { data: submissionData, error: submissionError },
+        { data: profileRows, error: profileError },
+      ] =
         await Promise.all([
           assignmentIds.length
             ? supabase
                 .from('submissions')
-                .select('assignment_id, status')
+                .select('id, assignment_id, status')
                 .in('assignment_id', assignmentIds)
             : Promise.resolve({ data: [], error: null }),
           userIds.length
@@ -180,6 +208,20 @@ export function DashboardPage() {
       }
 
       const submissions = (submissionData ?? []) as SubmissionRow[]
+      const submissionIdsFromRows = submissions.map((item) => item.id)
+      const { data: evaluationJobRows, error: evaluationJobsError } = submissionIdsFromRows.length
+        ? await supabase
+            .from('evaluation_jobs')
+            .select('submission_id, status, last_error, updated_at')
+            .in('submission_id', submissionIdsFromRows)
+            .order('updated_at', { ascending: false })
+        : { data: [], error: null }
+
+      if (evaluationJobsError) {
+        return
+      }
+
+      const evaluationJobs = (evaluationJobRows ?? []) as EvaluationJobRow[]
       const profileMap = new Map(
         ((profileRows ?? []) as ProfileRow[]).map((item) => [item.id, item.display_name ?? item.id]),
       )
@@ -192,6 +234,33 @@ export function DashboardPage() {
           item.assignment_id,
           (submissionsByAssignment.get(item.assignment_id) ?? 0) + 1,
         )
+      })
+
+      const latestEvaluationJobBySubmission = new Map<string, EvaluationJobRow>()
+      evaluationJobs.forEach((item) => {
+        if (!latestEvaluationJobBySubmission.has(item.submission_id)) {
+          latestEvaluationJobBySubmission.set(item.submission_id, item)
+        }
+      })
+
+      const aiFailedSummaryByAssignment = new Map<
+        string,
+        { failedCount: number; lastError: string | null }
+      >()
+      let aiReviewFailures = 0
+
+      submissions.forEach((submission) => {
+        const latestJob = latestEvaluationJobBySubmission.get(submission.id)
+        if (latestJob?.status !== 'failed') return
+
+        aiReviewFailures += 1
+        const current = aiFailedSummaryByAssignment.get(submission.assignment_id) ?? {
+          failedCount: 0,
+          lastError: null,
+        }
+        current.failedCount += 1
+        current.lastError = current.lastError ?? latestJob.last_error ?? null
+        aiFailedSummaryByAssignment.set(submission.assignment_id, current)
       })
 
       const teacherByClass = new Map<string, number>()
@@ -314,6 +383,7 @@ export function DashboardPage() {
           )
         }).length,
         overdueAssignments,
+        aiReviewFailures,
       })
 
       setSchoolWatch(
@@ -327,6 +397,30 @@ export function DashboardPage() {
       setClassIssues([...noTeacherClasses, ...noSubmissionClasses].slice(0, 6))
       setAssignmentIssues(overdueWatch)
       setActivationIssues(pendingActivationWatch)
+      setAiReviewIssues(
+        assignments
+          .map((assignment) => {
+            const aiSummary = aiFailedSummaryByAssignment.get(assignment.id)
+            if (!aiSummary) return null
+
+            const classRecord = classMap.get(assignment.class_id)
+            return {
+              id: assignment.id,
+              title: assignment.title,
+              classId: assignment.class_id,
+              className: classRecord?.name ?? assignment.class_id,
+              schoolId: classRecord?.school_id ?? assignment.school_id,
+              schoolName: classRecord
+                ? schoolMap.get(classRecord.school_id) ?? classRecord.school_id
+                : schoolMap.get(assignment.school_id) ?? assignment.school_id,
+              failedCount: aiSummary.failedCount,
+              lastError: aiSummary.lastError,
+            }
+          })
+          .filter(Boolean)
+          .sort((left, right) => (right?.failedCount ?? 0) - (left?.failedCount ?? 0))
+          .slice(0, 4) as AiReviewIssue[],
+      )
     }
 
     void load()
@@ -367,6 +461,12 @@ export function DashboardPage() {
           to="/assignments?risk=overdue"
           value={metrics.overdueAssignments}
         />
+        <MetricLinkCard
+          description="AI 初评失败的提交需要尽快人工接住"
+          label="AI 初评失败"
+          to="/assignments?risk=ai_failed"
+          value={metrics.aiReviewFailures}
+        />
       </section>
 
       <section className="two-column">
@@ -393,6 +493,12 @@ export function DashboardPage() {
               title="检查无提交班级的作业执行"
               to="/classes?risk=no_submissions"
               tone="active"
+            />
+            <ActionItem
+              subtitle={`当前有 ${metrics.aiReviewFailures} 条 AI 初评失败记录需要人工兜底。`}
+              title="优先处理 AI 初评异常作业"
+              to="/assignments?risk=ai_failed"
+              tone={metrics.aiReviewFailures > 0 ? 'danger' : undefined}
             />
             <ActionItem
               subtitle={`今天新增 ${metrics.newStudentsToday} 个学员账号，确认已发放给家长或老师。`}
@@ -457,6 +563,32 @@ export function DashboardPage() {
                       </span>
                     </div>
                     <Link className="quick-link" to={`/assignments?classId=${item.classId}&risk=overdue`}>
+                      去处理
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </DashboardIssueGroup>
+
+          <DashboardIssueGroup title="AI 初评异常">
+            {aiReviewIssues.length === 0 ? (
+              <div className="empty-inline">当前没有 AI 初评失败记录。</div>
+            ) : (
+              <ul className="info-list">
+                {aiReviewIssues.map((item) => (
+                  <li key={item.id}>
+                    <div className="info-meta">
+                      <strong>{item.title}</strong>
+                      <span>
+                        {item.schoolName} · {item.className} · 失败 {item.failedCount} 条
+                        {item.lastError ? ` · ${friendlyManagementAiError(item.lastError)}` : ''}
+                      </span>
+                    </div>
+                    <Link
+                      className="quick-link"
+                      to={`/assignments?assignmentId=${item.id}&risk=ai_failed`}
+                    >
                       去处理
                     </Link>
                   </li>
@@ -537,6 +669,24 @@ export function DashboardPage() {
   )
 }
 
+function friendlyManagementAiError(error: string) {
+  const lowered = error.toLowerCase()
+  if (lowered.includes('transcription')) {
+    return '转写失败'
+  }
+  if (
+    lowered.includes('503') ||
+    lowered.includes('temporarily unavailable') ||
+    lowered.includes('timeout')
+  ) {
+    return '上游 AI 暂不可用'
+  }
+  if (lowered.includes('download')) {
+    return '音频附件读取失败'
+  }
+  return error
+}
+
 function MetricLinkCard({
   label,
   value,
@@ -565,7 +715,7 @@ function ActionItem({
 }: {
   title: string
   subtitle: string
-  tone?: 'active' | 'draft'
+  tone?: 'active' | 'draft' | 'danger'
   to: string
 }) {
   return (
@@ -575,7 +725,7 @@ function ActionItem({
         <span>{subtitle}</span>
       </div>
       <span className={`status-pill ${tone ?? ''}`.trim()}>
-        {tone === 'draft' ? '优先' : '跟进中'}
+        {tone === 'draft' ? '优先' : tone === 'danger' ? '先处理' : '跟进中'}
       </span>
     </Link>
   )

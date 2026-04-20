@@ -32,9 +32,16 @@ type MembershipRow = {
 }
 
 type SubmissionRow = {
+  id: string
   assignment_id: string
   student_id: string
   status: string
+}
+
+type EvaluationJobRow = {
+  submission_id: string
+  status: string | null
+  last_error: string | null
 }
 
 type ProfileRow = {
@@ -52,6 +59,10 @@ type AssignmentView = AssignmentRow & {
   overdue: boolean
   teacherCount: number
   pendingStudentNames: string[]
+  aiFailureCount: number
+  aiProcessingCount: number
+  aiLastError: string | null
+  aiFailedStudentNames: string[]
   riskLabel: string
 }
 
@@ -68,12 +79,14 @@ export function AssignmentsPage() {
   )
   const focusedClassId = searchParams.get('classId')
   const focusedRisk = searchParams.get('risk')
+  const focusedAssignmentId = searchParams.get('assignmentId')
 
   const visibleAssignments = useMemo(
     () =>
       assignments.filter((item) => {
         if (focusedClassId && item.class_id !== focusedClassId) return false
         if (focusedRisk === 'overdue' && !item.overdue) return false
+        if (focusedRisk === 'ai_failed' && item.aiFailureCount === 0) return false
         return true
       }),
     [assignments, focusedClassId, focusedRisk],
@@ -85,10 +98,11 @@ export function AssignmentsPage() {
 
   const selectedAssignment = useMemo(
     () =>
+      visibleAssignments.find((item) => item.id === focusedAssignmentId) ??
       visibleAssignments.find((item) => item.id === selectedAssignmentId) ??
       visibleAssignments[0] ??
       null,
-    [selectedAssignmentId, visibleAssignments],
+    [focusedAssignmentId, selectedAssignmentId, visibleAssignments],
   )
 
   useEffect(() => {
@@ -130,7 +144,7 @@ export function AssignmentsPage() {
           assignmentIds.length
             ? supabase
                 .from('submissions')
-                .select('assignment_id, student_id, status')
+                .select('id, assignment_id, student_id, status')
                 .in('assignment_id', assignmentIds)
             : Promise.resolve({ data: [], error: null }),
           supabase.from('profiles').select('id, display_name'),
@@ -170,9 +184,35 @@ export function AssignmentsPage() {
         }
       })
 
+      const submissions = (submissionsResponse.data ?? []) as SubmissionRow[]
+      const submissionIds = submissions.map((item) => item.id)
+      const { data: evaluationJobsRows, error: evaluationJobsError } = submissionIds.length
+        ? await supabase
+            .from('evaluation_jobs')
+            .select('submission_id, status, last_error, updated_at')
+            .in('submission_id', submissionIds)
+            .order('updated_at', { ascending: false })
+        : { data: [], error: null }
+
+      if (evaluationJobsError) {
+        return
+      }
+
+      const latestEvaluationJobBySubmission = new Map<string, EvaluationJobRow>()
+      ;((evaluationJobsRows ?? []) as EvaluationJobRow[]).forEach((item) => {
+        if (!latestEvaluationJobBySubmission.has(item.submission_id)) {
+          latestEvaluationJobBySubmission.set(item.submission_id, item)
+        }
+      })
+
       const submittedStudentIdsByAssignment = new Map<string, Set<string>>()
       const pendingCountByAssignment = new Map<string, number>()
-      ;((submissionsResponse.data ?? []) as SubmissionRow[]).forEach((item) => {
+      const aiFailureCountByAssignment = new Map<string, number>()
+      const aiProcessingCountByAssignment = new Map<string, number>()
+      const aiLastErrorByAssignment = new Map<string, string | null>()
+      const aiFailedStudentNamesByAssignment = new Map<string, string[]>()
+
+      submissions.forEach((item) => {
         if (item.status === 'draft') return
 
         const current = submittedStudentIdsByAssignment.get(item.assignment_id) ?? new Set<string>()
@@ -183,6 +223,32 @@ export function AssignmentsPage() {
           pendingCountByAssignment.set(
             item.assignment_id,
             (pendingCountByAssignment.get(item.assignment_id) ?? 0) + 1,
+          )
+        }
+
+        const latestJob = latestEvaluationJobBySubmission.get(item.id)
+        if (latestJob?.status === 'failed') {
+          aiFailureCountByAssignment.set(
+            item.assignment_id,
+            (aiFailureCountByAssignment.get(item.assignment_id) ?? 0) + 1,
+          )
+          if (!aiLastErrorByAssignment.has(item.assignment_id)) {
+            aiLastErrorByAssignment.set(item.assignment_id, latestJob.last_error ?? null)
+          }
+
+          const currentNames = aiFailedStudentNamesByAssignment.get(item.assignment_id) ?? []
+          currentNames.push(profileMap.get(item.student_id) ?? item.student_id)
+          aiFailedStudentNamesByAssignment.set(item.assignment_id, currentNames)
+        }
+
+        if (
+          latestJob?.status === 'queued' ||
+          latestJob?.status === 'pending' ||
+          latestJob?.status === 'processing'
+        ) {
+          aiProcessingCountByAssignment.set(
+            item.assignment_id,
+            (aiProcessingCountByAssignment.get(item.assignment_id) ?? 0) + 1,
           )
         }
       })
@@ -201,6 +267,8 @@ export function AssignmentsPage() {
         const overdue = Boolean(item.due_at) && new Date(item.due_at as string) < now && item.status === 'published'
         const teacherCount = teacherCountByClass.get(item.class_id) ?? 0
         const pendingCount = pendingCountByAssignment.get(item.id) ?? 0
+        const aiFailureCount = aiFailureCountByAssignment.get(item.id) ?? 0
+        const aiProcessingCount = aiProcessingCountByAssignment.get(item.id) ?? 0
 
         return {
           ...item,
@@ -214,12 +282,17 @@ export function AssignmentsPage() {
           overdue,
           teacherCount,
           pendingStudentNames,
+          aiFailureCount,
+          aiProcessingCount,
+          aiLastError: aiLastErrorByAssignment.get(item.id) ?? null,
+          aiFailedStudentNames: aiFailedStudentNamesByAssignment.get(item.id) ?? [],
           riskLabel: buildRiskLabel({
             overdue,
             teacherCount,
             submittedCount,
             expectedStudents,
             pendingCount,
+            aiFailureCount,
           }),
         }
       })
@@ -246,6 +319,41 @@ export function AssignmentsPage() {
 
     setSelectedAssignmentId(visibleAssignments[0].id)
   }, [selectedAssignmentId, visibleAssignments])
+
+  const handleCopyAiFailureSummary = async (assignment: AssignmentView) => {
+    const summary = [
+      `作业：${assignment.title}`,
+      `班级：${assignment.className}`,
+      `校区：${assignment.schoolName}`,
+      `AI 初评失败：${assignment.aiFailureCount} 条`,
+      assignment.aiLastError
+        ? `最近异常：${friendlyManagementAiError(assignment.aiLastError)}`
+        : '最近异常：暂无',
+      `异常学员：${
+        assignment.aiFailedStudentNames.length > 0
+          ? assignment.aiFailedStudentNames.join('、')
+          : '当前无异常学员'
+      }`,
+      '建议优先通知教师人工查看，并在服务恢复后重新发起 AI 初评。',
+    ].join('\n')
+
+    void copyText(summary)
+  }
+
+  const handleExportAiFailureList = (assignment: AssignmentView) => {
+    const rows = [
+      ['作业', '班级', '校区', '学员姓名', '异常类型'],
+      ...assignment.aiFailedStudentNames.map((name) => [
+        assignment.title,
+        assignment.className,
+        assignment.schoolName,
+        name,
+        assignment.aiLastError ? friendlyManagementAiError(assignment.aiLastError) : 'AI 初评失败',
+      ]),
+    ]
+
+    downloadCsv(`${assignment.className}-${assignment.title}-AI异常名单.csv`, rows)
+  }
 
   const handleCopyReminder = async (assignment: AssignmentView) => {
     const reminder = [
@@ -298,11 +406,15 @@ export function AssignmentsPage() {
             <strong>
               {focusedRisk === 'overdue'
                 ? '当前聚焦：逾期作业'
+                : focusedRisk === 'ai_failed'
+                  ? '当前聚焦：AI 初评失败'
                 : `当前聚焦班级：${focusedClassName}`}
             </strong>
             <span>
               {focusedRisk === 'overdue'
                 ? '这里只显示已逾期的作业，方便优先处理。'
+                : focusedRisk === 'ai_failed'
+                  ? '这里只显示 AI 初评失败的作业，方便校区先人工兜底。'
                 : '只展示这个班级的作业，方便一路跟进到底。'}
             </span>
           </div>
@@ -312,6 +424,7 @@ export function AssignmentsPage() {
               const nextParams = new URLSearchParams(searchParams)
               nextParams.delete('classId')
               nextParams.delete('risk')
+              nextParams.delete('assignmentId')
               setSearchParams(nextParams)
             }}
             type="button"
@@ -335,6 +448,7 @@ export function AssignmentsPage() {
                   <th>状态</th>
                   <th>提交率</th>
                   <th>待处理</th>
+                  <th>AI 异常</th>
                   <th>风险</th>
                 </tr>
               </thead>
@@ -359,6 +473,7 @@ export function AssignmentsPage() {
                     </td>
                     <td>{item.status === 'draft' ? '-' : `${item.submissionRate}%`}</td>
                     <td>{item.pendingCount > 0 ? `${item.pendingCount} 份` : '无'}</td>
+                    <td>{item.aiFailureCount > 0 ? `${item.aiFailureCount} 条` : '无'}</td>
                     <td>{item.riskLabel}</td>
                   </tr>
                 ))}
@@ -385,6 +500,31 @@ export function AssignmentsPage() {
               </div>
 
               <div className="action-list">
+                <ActionItem
+                  title={
+                    selectedAssignment.aiFailureCount > 0
+                      ? `AI 初评失败 ${selectedAssignment.aiFailureCount} 条`
+                      : selectedAssignment.aiProcessingCount > 0
+                        ? `AI 初评处理中 ${selectedAssignment.aiProcessingCount} 条`
+                        : 'AI 初评运行正常'
+                  }
+                  subtitle={
+                    selectedAssignment.aiFailureCount > 0
+                      ? selectedAssignment.aiLastError
+                        ? `最近一次异常：${friendlyManagementAiError(selectedAssignment.aiLastError)}`
+                        : '建议先让老师人工查看这些提交，再决定是否重新发起 AI 初评。'
+                      : selectedAssignment.aiProcessingCount > 0
+                        ? '当前还有提交在等待 AI 返回结果，建议稍后刷新再看。'
+                        : '当前没有发现 AI 初评异常。'
+                  }
+                  tone={
+                    selectedAssignment.aiFailureCount > 0
+                      ? 'danger'
+                      : selectedAssignment.aiProcessingCount > 0
+                        ? 'draft'
+                        : undefined
+                  }
+                />
                 <ActionItem
                   title={selectedAssignment.overdue ? '作业已逾期，需要跟进' : '截止时间正常'}
                   subtitle={
@@ -428,6 +568,20 @@ export function AssignmentsPage() {
               </div>
 
               <div className="action-button-row">
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() => void handleCopyAiFailureSummary(selectedAssignment)}
+                  type="button"
+                >
+                  复制 AI 异常摘要
+                </button>
+                <button
+                  className="ghost-button compact-button"
+                  onClick={() => handleExportAiFailureList(selectedAssignment)}
+                  type="button"
+                >
+                  导出 AI 异常名单
+                </button>
                 <button
                   className="ghost-button compact-button"
                   onClick={() => void handleCopyReminder(selectedAssignment)}
@@ -488,6 +642,31 @@ export function AssignmentsPage() {
                   ))}
                 </ul>
               )}
+
+              <div className="panel-header compact">
+                <h3>AI 异常学员</h3>
+                <p>这些学员已提交作业，但 AI 初评没有顺利完成。</p>
+              </div>
+
+              {selectedAssignment.aiFailedStudentNames.length === 0 ? (
+                <div className="empty-inline">这份作业当前没有 AI 初评异常学员。</div>
+              ) : (
+                <ul className="info-list pending-list">
+                  {selectedAssignment.aiFailedStudentNames.map((name) => (
+                    <li key={`${selectedAssignment.id}-${name}`}>
+                      <div className="info-meta">
+                        <strong>{name}</strong>
+                        <span>
+                          {selectedAssignment.aiLastError
+                            ? friendlyManagementAiError(selectedAssignment.aiLastError)
+                            : '建议老师优先人工查看'}
+                        </span>
+                      </div>
+                      <span className="status-pill danger">AI 失败</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </aside>
           ) : null}
         </div>
@@ -509,18 +688,39 @@ function buildRiskLabel({
   submittedCount,
   expectedStudents,
   pendingCount,
+  aiFailureCount,
 }: {
   overdue: boolean
   teacherCount: number
   submittedCount: number
   expectedStudents: number
   pendingCount: number
+  aiFailureCount: number
 }) {
   if (teacherCount === 0) return '缺教师'
+  if (aiFailureCount > 0) return 'AI异常'
   if (overdue) return '已逾期'
   if (expectedStudents > 0 && submittedCount === 0) return '零提交'
   if (pendingCount > 0) return '待处理多'
   return '稳定'
+}
+
+function friendlyManagementAiError(error: string) {
+  const lowered = error.toLowerCase()
+  if (lowered.includes('transcription')) {
+    return '转写失败'
+  }
+  if (
+    lowered.includes('503') ||
+    lowered.includes('temporarily unavailable') ||
+    lowered.includes('timeout')
+  ) {
+    return '上游 AI 暂不可用'
+  }
+  if (lowered.includes('download')) {
+    return '音频附件读取失败'
+  }
+  return error
 }
 
 function MetricMini({ label, value }: { label: string; value: string }) {
