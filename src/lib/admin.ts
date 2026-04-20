@@ -212,6 +212,7 @@ type ProcessAiQueuePayload = {
 type RetryFailedAiReviewsPayload = {
   schoolId: string
   assignmentId?: string
+  submissionIds?: string[]
   runNow?: boolean
   batchSize?: number
 }
