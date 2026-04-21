@@ -34,6 +34,10 @@ npm run dev
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
 
+生产环境可参考：
+
+- `.env.production.example`
+
 ## GitHub Actions
 
 工作流文件：
@@ -44,6 +48,12 @@ npm run dev
 
 - `SUPABASE_URL`
 - `SUPABASE_PUBLISHABLE_KEY`
+
+## 部署
+
+国内服务器 + `Nginx Proxy Manager` 部署步骤见：
+
+- [docs/nginx-proxy-manager-deploy.md](/Volumes/移动磁盘/peixun%20/management_app/docs/nginx-proxy-manager-deploy.md)
 
 ## 相关仓库
 
