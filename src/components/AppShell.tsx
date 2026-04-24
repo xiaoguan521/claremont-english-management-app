@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
 
 import { useAuth } from '../lib/auth'
+import { useSchoolBrand } from '../lib/useSchoolBrand'
 
 const navigationItems = [
   { to: '/', label: '管理概览', end: true },
@@ -13,14 +14,30 @@ const navigationItems = [
 
 export function AppShell() {
   const { profile, session, signOut } = useAuth()
+  const brand = useSchoolBrand()
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-block">
-          <span className="eyebrow">Management</span>
-          <h1>校区管理端</h1>
-          <p>管理班级、教师、学员与校区运行情况。</p>
+          <div className="brand-header">
+            {brand.logoUrl ? (
+              <img
+                className="brand-logo"
+                src={brand.logoUrl}
+                alt={brand.shellTitle}
+              />
+            ) : (
+              <div className="brand-mark">{brand.logoFallback}</div>
+            )}
+            <div>
+              {brand.brandName ? (
+                <span className="eyebrow">{brand.brandName}</span>
+              ) : null}
+              <h1>{brand.shellTitle}</h1>
+            </div>
+          </div>
+          <p>管理班级、教师、学员与机构运行情况。</p>
         </div>
 
         <div className="user-panel">

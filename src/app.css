@@ -3,7 +3,11 @@
   grid-template-columns: 280px minmax(0, 1fr);
   min-height: 100vh;
   background:
-    radial-gradient(circle at top right, rgba(37, 99, 235, 0.18), transparent 28%),
+    radial-gradient(
+      circle at top right,
+      rgba(37, 99, 235, 0.18),
+      transparent 28%
+    ),
     linear-gradient(180deg, #eef5ff 0%, #f8fbff 56%, #ffffff 100%);
 }
 
@@ -19,6 +23,37 @@
 .brand-block {
   display: grid;
   gap: 8px;
+}
+
+.brand-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.brand-mark,
+.brand-logo {
+  width: 52px;
+  height: 52px;
+  border-radius: 18px;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  font-weight: 900;
+  color: #f8fafc;
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.8),
+    rgba(14, 165, 233, 0.76)
+  );
+}
+
+.brand-logo {
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .brand-block h1 {
@@ -67,7 +102,11 @@
 
 .nav-item.active,
 .nav-item:hover {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.36), rgba(14, 165, 233, 0.28));
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.36),
+    rgba(14, 165, 233, 0.28)
+  );
   color: #f8fafc;
 }
 
@@ -331,6 +370,40 @@
   grid-column: 1 / -1;
 }
 
+.brand-upload-panel {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  padding: 18px 20px;
+  border-radius: 20px;
+  background: rgba(239, 246, 255, 0.82);
+}
+
+.brand-upload-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.brand-upload-copy strong {
+  color: #0f172a;
+}
+
+.brand-upload-copy p {
+  margin: 0;
+  color: #475569;
+}
+
+.brand-upload-actions {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.brand-upload-input {
+  display: none;
+}
+
 .form-actions {
   display: flex;
   justify-content: flex-start;
@@ -531,7 +604,11 @@
   min-height: 100vh;
   padding: 28px;
   background:
-    radial-gradient(circle at top left, rgba(14, 165, 233, 0.18), transparent 25%),
+    radial-gradient(
+      circle at top left,
+      rgba(14, 165, 233, 0.18),
+      transparent 25%
+    ),
     linear-gradient(180deg, #eaf4ff 0%, #f8fbff 56%, #ffffff 100%);
 }
 
@@ -703,6 +780,197 @@
   line-height: 1.6;
 }
 
+.school-brand-preview {
+  margin-top: -4px;
+}
+
+.school-brand-preview-card {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.94);
+}
+
+.school-brand-logo-frame,
+.school-brand-preview-card img,
+.school-brand-preview-fallback {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  flex: 0 0 56px;
+}
+
+.school-brand-logo-frame,
+.school-brand-surface,
+.logo-cropper-stage {
+  position: relative;
+  overflow: hidden;
+}
+
+.school-brand-logo-checker {
+  background-color: #f8fafc;
+  background-image:
+    linear-gradient(45deg, rgba(148, 163, 184, 0.22) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(148, 163, 184, 0.22) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(148, 163, 184, 0.22) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(148, 163, 184, 0.22) 75%);
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+}
+
+.school-brand-preview-card img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.school-brand-preview-fallback {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.8),
+    rgba(14, 165, 233, 0.76)
+  );
+  color: white;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.school-brand-preview-card strong {
+  color: #0f172a;
+  font-size: 16px;
+}
+
+.school-brand-preview-card p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.school-brand-surface-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.school-brand-surface {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 16px 14px;
+  border-radius: 18px;
+}
+
+.school-brand-surface img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 18px;
+}
+
+.school-brand-surface span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.school-brand-surface-dark {
+  background: linear-gradient(135deg, #0f172a, #334155);
+}
+
+.school-brand-surface-dark span {
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.logo-cropper-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.56);
+  backdrop-filter: blur(12px);
+}
+
+.logo-cropper-dialog {
+  width: min(920px, 100%);
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 28px 60px rgba(15, 23, 42, 0.22);
+}
+
+.logo-cropper-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  gap: 20px;
+  align-items: start;
+}
+
+.logo-cropper-stage {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border-radius: 24px;
+  min-height: 360px;
+}
+
+.logo-cropper-window {
+  position: relative;
+  width: 280px;
+  height: 280px;
+  overflow: hidden;
+  border-radius: 32px;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.95),
+    0 12px 30px rgba(15, 23, 42, 0.18);
+}
+
+.logo-cropper-window img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  transform-origin: center center;
+  user-select: none;
+  pointer-events: none;
+}
+
+.logo-cropper-controls {
+  display: grid;
+  gap: 14px;
+}
+
+.logo-cropper-controls label {
+  display: grid;
+  gap: 8px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.logo-cropper-controls input[type="range"] {
+  width: 100%;
+}
+
+.logo-cropper-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .table-action-select {
   min-width: 148px;
   border: 1px solid rgba(148, 163, 184, 0.36);
@@ -736,6 +1004,10 @@
   .operations-metrics {
     grid-template-columns: 1fr 1fr 1fr;
   }
+
+  .logo-cropper-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 940px) {
@@ -758,6 +1030,38 @@
 
   .span-2 {
     grid-column: auto;
+  }
+
+  .brand-upload-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .brand-upload-actions {
+    justify-items: stretch;
+    width: 100%;
+  }
+
+  .school-brand-surface-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .logo-cropper-backdrop {
+    padding: 14px;
+  }
+
+  .logo-cropper-dialog {
+    padding: 18px;
+  }
+
+  .logo-cropper-stage {
+    min-height: 0;
+    padding: 18px;
+  }
+
+  .logo-cropper-window {
+    width: min(280px, calc(100vw - 84px));
+    height: min(280px, calc(100vw - 84px));
   }
 
   .content-area {
